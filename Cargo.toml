@@ -1,0 +1,16 @@
+[package]
+name = "kiwi-rs"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+license = "LGPL-3.0-or-later"
+description = "Ergonomic Rust bindings for the Kiwi Korean morphological analyzer C API"
+readme = "README.md"
+repository = "https://github.com/bab2min/Kiwi"
+homepage = "https://github.com/bab2min/Kiwi"
+documentation = "https://docs.rs/kiwi-rs"
+keywords = ["korean", "nlp", "morphology", "tokenizer", "ffi"]
+categories = ["api-bindings", "text-processing"]
+
+[dependencies]
+regex = "1.12.2"
