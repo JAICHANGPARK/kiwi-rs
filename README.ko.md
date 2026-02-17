@@ -371,32 +371,46 @@ xychart-beta
 
 - 처리량(Throughput) = 1초당 처리 호출 수 (`calls/sec`, 클수록 좋음)
 - 지연시간(Latency) = 호출 1건 평균 시간 (`avg_ms`, 작을수록 좋음)
-- 아래 차트의 첫 번째 bar 시리즈는 `kiwi-rs`, 두 번째는 `kiwipiepy`입니다.
+- 일부 렌더러에서 `mermaid xychart-beta`의 다중 bar 시리즈가 겹쳐 보일 수 있습니다.
+- 가독성을 위해 아래 차트는 엔진별로 분리했습니다.
 
 ```mermaid
 xychart-beta
-    title "Varied 처리량 (핵심 기능)"
+    title "Varied 처리량 (핵심 기능, kiwi-rs)"
     x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
     y-axis "calls/sec (클수록 좋음)" 0 --> 8000
     bar [6956.95,7319.22,5104.73,4372.13,4944.59,5692.86,158.62,151.12,150.76]
+```
+
+```mermaid
+xychart-beta
+    title "Varied 처리량 (핵심 기능, kiwipiepy)"
+    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
+    y-axis "calls/sec (클수록 좋음)" 0 --> 8000
     bar [7393.81,7212.44,4399.49,4282.95,4497.21,4965.80,192.74,190.38,159.43]
 ```
 
 ```mermaid
 xychart-beta
-    title "Varied 처리량 (Join 단일)"
-    x-axis ["join"]
+    title "Varied 처리량 (Join)"
+    x-axis ["join (kiwi-rs)","join (kiwipiepy)"]
     y-axis "calls/sec (클수록 좋음)" 0 --> 3000000
-    bar [2927258.22]
-    bar [669983.08]
+    bar [2927258.22,669983.08]
 ```
 
 ```mermaid
 xychart-beta
-    title "Varied 지연시간 (핵심 기능)"
+    title "Varied 지연시간 (핵심 기능, kiwi-rs)"
     x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
     y-axis "avg ms/call (작을수록 좋음)" 0 --> 7
     bar [0.143741,0.136627,0.195897,0.228721,0.202241,0.175659,6.304233,6.617300,6.632977]
+```
+
+```mermaid
+xychart-beta
+    title "Varied 지연시간 (핵심 기능, kiwipiepy)"
+    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
+    y-axis "avg ms/call (작을수록 좋음)" 0 --> 7
     bar [0.135248,0.138649,0.227299,0.233484,0.222360,0.201377,5.188234,5.252784,6.272204]
 ```
 
