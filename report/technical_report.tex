@@ -7,6 +7,7 @@
 \usepackage{amsmath}
 \usepackage{amssymb}
 \usepackage{booktabs}
+\usepackage{array}
 \usepackage{siunitx}
 \usepackage{graphicx}
 \usepackage{tikz}
@@ -32,14 +33,16 @@
     group-separator={,},
     group-minimum-digits=4
 }
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
 
 \title{kiwi-rs: Ergonomic and Performance-Oriented Rust Bindings\\for the Kiwi Korean Morphological Analyzer}
 
 % Replace with final author metadata before submission.
 \author{
-Jai-Chang Park
+Jai-Chang Park\\
+Google Developer Expert (GDE), Dart \& Flutter
 }
-\date{February 17, 2026}
+\date{\today}
 
 \begin{document}
 \maketitle
@@ -74,7 +77,8 @@ Existing Rust interop stacks (e.g., generated C bindings, C++ bridge layers, Pyt
 This document is intentionally an \textbf{engineering technical report}: it prioritizes implementation transparency, reproducibility artifacts, and operational trade-offs over algorithmic novelty claims.
 
 \section{Related Work}
-To position \texttt{kiwi-rs} in the broader Korean NLP landscape, we organize representative prior work into eight tracks (20 papers total):
+To position \texttt{kiwi-rs} in the broader Korean NLP landscape, we separate prior work into (i) academic model/benchmark context and (ii) production ecosystem context.
+\paragraph{Academic model and benchmark context.}
 \begin{itemize}[leftmargin=1.5em]
     \item \textbf{Korean evaluation benchmarks.} KLUE defines a multi-task Korean language understanding benchmark suite, while KorQuAD provides a Korean machine-reading comprehension benchmark~\cite{klue2021,korquad2019}.
     \item \textbf{Korean pre-trained language models.} KR-BERT and KoreALBERT report Korean-specific pretraining strategies and efficiency trade-offs for encoder models~\cite{krbert2020,korealbert2021}.
@@ -86,7 +90,44 @@ To position \texttt{kiwi-rs} in the broader Korean NLP landscape, we organize re
     \item \textbf{Subword and OOV robustness.} Neural LM and subword representation lines (including WordPiece-style segmentation in Japanese/Korean voice search and subword-enriched embeddings) motivate robust handling of sparse or unseen forms~\cite{bengio2003nlm,schuster2012jkvoice,bojanowski2017subword}.
 \end{itemize}
 
-These studies primarily evaluate model quality and benchmark accuracy. \texttt{kiwi-rs} is complementary: it contributes a systems-level engineering layer for safe, reproducible, and high-throughput Rust deployment over the existing Kiwi analyzer.
+\paragraph{Production ecosystem context.}
+For practical deployment choices, the current Korean morphology landscape includes open-source analyzers and hosted services: KoNLPy's multi-analyzer wrapper (\texttt{Hannanum}/\texttt{Kkma}/\texttt{Komoran}/\texttt{Mecab}/\texttt{Okt}), MeCab-ko lineage analyzers, Kakao's Khaiii, KOMORAN, Open Korean Text, Elasticsearch Nori integration, and hosted APIs such as Bareun/ETRI platforms~\cite{konlpy_docs,konlpy_tag_api,konlpy_paper,mecab_ko,khaiii_repo,komoran_repo,openkoreantext_repo,mecab2004crf,nori_ko,bareun_pypi,etri_aiopen_notice,etri_epretx,etri_epretx_api_list}. Table~\ref{tab:ko_analyzer_landscape} summarizes these options from an engineering perspective.
+
+These two bodies of work are complementary to \texttt{kiwi-rs}: the academic line informs model-level context, while the ecosystem line clarifies real deployment alternatives.
+
+Table~\ref{tab:ko_analyzer_landscape} summarizes widely used Korean morphological analysis options from an engineering deployment perspective.
+
+\begin{table*}[t]
+\centering
+\caption{Korean morphological analyzer landscape (engineering comparison, snapshot: 2026-02-17).}
+\label{tab:ko_analyzer_landscape}
+\scriptsize
+\renewcommand{\arraystretch}{1.12}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{@{}P{0.11\linewidth}P{0.19\linewidth}P{0.16\linewidth}P{0.22\linewidth}P{0.24\linewidth}@{}}
+\toprule
+System & Core model/runtime & Distribution model & Interfaces & Operational notes \\
+\midrule
+Kiwi~\cite{kiwi_repo,kiwi_kjdh_2024,kiwi_releases} & C++ analyzer with statistical LM + skip-bigram disambiguation & Open-source library with prebuilt binaries for major OSes & C API; wrappers for Python, Java, C\#, Go, R, and WASM & Broad ecosystem and rich POS extensions; baseline engine targeted by \texttt{kiwi-rs} \\
+
+Khaiii~\cite{khaiii_repo} & Data-driven CNN-based Korean morphological analyzer & Open-source project repository & Native runtime and tooling documented in the upstream project & Upstream docs describe dictionary and patch workflows for practical correction loops \\
+
+KOMORAN~\cite{komoran_repo} & Java-based analyzer with dictionary/TRIE-centered design & Open-source Java library & Java API, plus ecosystem wrappers such as PyKOMORAN & JVM-native deployment; custom dictionary workflow emphasized in docs \\
+
+Open Korean Text (Okt)~\cite{openkoreantext_repo,konlpy_tag_api} & Scala/Java Korean text processor & Open-source library & Scala/Java APIs; KoNLPy \texttt{Okt} wrapper & Supports normalization, tokenization, stemming, and phrase extraction for practical indexing workflows \\
+
+MeCab-ko lineage~\cite{mecab_ko,mecab2004crf,konlpy_tag_api} & MeCab-style dictionary analyzer lineage rooted in CRF-era segmentation/POS design & Community distributions (\texttt{mecab-ko} and dictionaries) & Standalone deployment; KoNLPy \texttt{Mecab} wrapper & Common production choice in indexing/search stacks when dictionary control is required \\
+
+KoNLPy wrapper layer~\cite{konlpy_docs,konlpy_paper,konlpy_tag_api} & Python integration layer over heterogeneous analyzers & Python package & Unified API over Hannanum, Kkma, Komoran, Mecab, and Okt & Strong prototyping ergonomics; runtime behavior depends on selected backend analyzer \\
+
+Elasticsearch Nori~\cite{nori_ko} & Lucene Nori module using \texttt{mecab-ko-dic} & Elasticsearch analysis plugin & Analyzer components for Elasticsearch index/query pipelines & Search-oriented morphological analysis integration for production retrieval systems \\
+
+Bareun API~\cite{bareun_pypi} & Hosted Korean NLP service (\texttt{bareunpy} gRPC client package) & Managed service with client SDK & Python client and service endpoint integration & Provider-managed API operation with credential-based access \\
+
+ETRI EPRETX~\cite{etri_aiopen_notice,etri_epretx,etri_epretx_api_list} & Public hosted AI API platform (language-processing category) & Managed service portal & Key-based API access from EPRETX portal & AI Open site reports closure on 2025-06-30; EPRETX provides the current portal/API list \\
+\bottomrule
+\end{tabular}
+\end{table*}
 
 \section{Background: Kiwi}
 Kiwi is a Korean morphological analyzer implemented in C++ and distributed with a public C API, which makes it usable across multiple language runtimes~\cite{kiwi_repo}. \textbf{In modeling terms, Kiwi is not presented upstream as a Transformer architecture; it is described as statistical LM + skip-bigram based disambiguation}~\cite{kiwi_repo,kiwi_kjdh_2024}. In practice, Kiwi is commonly consumed through \texttt{kiwipiepy} in Python workflows, while additional ecosystem bindings target other environments~\cite{kiwipiepy,kiwi_repo}.
@@ -94,7 +135,7 @@ Kiwi is a Korean morphological analyzer implemented in C++ and distributed with 
 \subsection{Modeling Basis Clarification (Not Transformer Architecture)}
 Because the Kiwi codebase contains identifiers such as \texttt{TypoTransformer} and \texttt{history\_transformer}, it is easy to misread the engine as Transformer-architecture NLP. Upstream documentation and the project citation, however, describe Kiwi's ambiguity resolution as a combination of a statistical language model and skip-bigram modeling~\cite{kiwi_repo,kiwi_kjdh_2024}. In this report, we therefore treat Kiwi as a statistical morphology analyzer with LM-based disambiguation, while Transformer-family papers are used only as adjacent related-work context.
 
-\paragraph{Reviewer-oriented disambiguation (\texttt{TypoTransformer} question).}
+\paragraph{Architectural Clarification: The \texttt{TypoTransformer} Component.}
 For the specific review concern ``\texttt{TypoTransformer} exists, so is Kiwi Transformer-based?'', our source audit indicates \textbf{no}:
 \begin{itemize}[leftmargin=1.5em]
     \item \texttt{TypoTransformer} is an error/typo generation-correction utility class (rule/cost based), not a neural encoder block.
@@ -402,7 +443,7 @@ Captured benchmark artifacts include explicit environment snapshots. We use two 
 
 For Tier A primary runs, the harness recorded:
 \begin{itemize}[leftmargin=1.5em]
-    \item \texttt{Git SHA}: \texttt{<REPO\_COMMIT\_SHA>} (\texttt{dirty=<true|false>});
+    \item \texttt{Git SHA} and dirty/clean status (captured in artifact metadata fields \texttt{environment.git\_sha} and \texttt{environment.git\_dirty});
     \item \texttt{KIWI\_LIBRARY\_PATH}: unset;
     \item \texttt{KIWI\_MODEL\_PATH}: unset.
 \end{itemize}
@@ -445,9 +486,10 @@ The second profile is included because this project contains a large volume of t
 \centering
 \caption{Coverage summary from \texttt{cargo llvm-cov} (workspace tests).}
 \label{tab:coverage_profiles}
-\begin{tabular}{lccc}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{P{0.46\linewidth}P{0.15\linewidth}P{0.15\linewidth}P{0.15\linewidth}}
 \toprule
-Profile & Region Cover & Line Cover & Function Cover \\
+Profile & Region Coverage & Line Coverage & Function Coverage \\
 \midrule
 Full workspace & 43.02\% & 41.12\% & 47.45\% \\
 Core logic (excluding \texttt{runtime.rs}/\texttt{native.rs}) & 94.69\% & 92.84\% & 94.21\% \\
