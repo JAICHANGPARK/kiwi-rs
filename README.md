@@ -434,6 +434,39 @@ xychart-beta
     bar [0.94,1.01,1.16,1.02,1.10,1.15,4.37,0.82,0.79,0.95]
 ```
 
+Absolute-value charts (varied input, near no-cache):
+
+- Throughput = number of calls processed per second (`calls/sec`, higher is better)
+- Latency = average time per call (`avg_ms`, lower is better)
+- In the charts below, the first bar series is `kiwi-rs`, and the second is `kiwipiepy`.
+
+```mermaid
+xychart-beta
+    title "Varied Throughput (Core Features)"
+    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
+    y-axis "calls/sec (higher is better)" 0 --> 8000
+    bar [6956.95,7319.22,5104.73,4372.13,4944.59,5692.86,158.62,151.12,150.76]
+    bar [7393.81,7212.44,4399.49,4282.95,4497.21,4965.80,192.74,190.38,159.43]
+```
+
+```mermaid
+xychart-beta
+    title "Varied Throughput (Join Only)"
+    x-axis ["join"]
+    y-axis "calls/sec (higher is better)" 0 --> 3000000
+    bar [2927258.22]
+    bar [669983.08]
+```
+
+```mermaid
+xychart-beta
+    title "Varied Latency (Core Features)"
+    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
+    y-axis "avg ms/call (lower is better)" 0 --> 7
+    bar [0.143741,0.136627,0.195897,0.228721,0.202241,0.175659,6.304233,6.617300,6.632977]
+    bar [0.135248,0.138649,0.227299,0.233484,0.222360,0.201377,5.188234,5.252784,6.272204]
+```
+
 Interpretation:
 
 - `join` is now faster on `kiwi-rs` for repeated identical morph sequences because the default `join` path reuses an internal LRU joiner cache.

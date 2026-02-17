@@ -367,6 +367,39 @@ xychart-beta
     bar [0.94,1.01,1.16,1.02,1.10,1.15,4.37,0.82,0.79,0.95]
 ```
 
+절대값 차트(다양 입력, no-cache 근사):
+
+- 처리량(Throughput) = 1초당 처리 호출 수 (`calls/sec`, 클수록 좋음)
+- 지연시간(Latency) = 호출 1건 평균 시간 (`avg_ms`, 작을수록 좋음)
+- 아래 차트의 첫 번째 bar 시리즈는 `kiwi-rs`, 두 번째는 `kiwipiepy`입니다.
+
+```mermaid
+xychart-beta
+    title "Varied 처리량 (핵심 기능)"
+    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
+    y-axis "calls/sec (클수록 좋음)" 0 --> 8000
+    bar [6956.95,7319.22,5104.73,4372.13,4944.59,5692.86,158.62,151.12,150.76]
+    bar [7393.81,7212.44,4399.49,4282.95,4497.21,4965.80,192.74,190.38,159.43]
+```
+
+```mermaid
+xychart-beta
+    title "Varied 처리량 (Join 단일)"
+    x-axis ["join"]
+    y-axis "calls/sec (클수록 좋음)" 0 --> 3000000
+    bar [2927258.22]
+    bar [669983.08]
+```
+
+```mermaid
+xychart-beta
+    title "Varied 지연시간 (핵심 기능)"
+    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
+    y-axis "avg ms/call (작을수록 좋음)" 0 --> 7
+    bar [0.143741,0.136627,0.195897,0.228721,0.202241,0.175659,6.304233,6.617300,6.632977]
+    bar [0.135248,0.138649,0.227299,0.233484,0.222360,0.201377,5.188234,5.252784,6.272204]
+```
+
 해석:
 
 - 반복적으로 동일한 형태소 시퀀스를 결합하는 경우, 기본 `join` 경로의 내부 LRU 캐시 효과로 `kiwi-rs`가 `join`에서도 우세하게 측정되었습니다.

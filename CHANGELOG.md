@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-02-17
+
+### Changed
+- Expanded benchmark documentation in `README.md` and `README.ko.md` with:
+  - percentage delta columns for repeated/varied ratio snapshots,
+  - absolute throughput bar charts (`calls/sec`),
+  - absolute latency bar charts (`avg_ms`),
+  - clearer metric interpretation guidance for end users.
+
 ## [0.1.2] - 2026-02-17
 
 ### Added
