@@ -288,9 +288,9 @@ Notes:
 - Ensure both runtimes use the same Kiwi library/model assets (`KIWI_LIBRARY_PATH`, `KIWI_MODEL_PATH`) when strict 1:1 comparison is required.
 - For option parity with `kiwipiepy` tokenize defaults, add `--python-default-options` on the Rust benchmark command.
 
-### Expanded feature benchmark snapshot (local run, 2026-02-17)
+### Publication-grade benchmark run (recommended)
 
-Commands:
+Use this command set when you publish benchmark claims externally:
 
 ```bash
 cd kiwi-rs
@@ -300,30 +300,143 @@ mkdir -p tmp
   --warmup 100 --iters 5000 \
   --batch-size 256 --batch-iters 500 \
   --input-mode repeated --variant-pool 4096 \
-  --repeats 1 \
-  --md-out tmp/feature_bench_repeated.md \
-  --json-out tmp/feature_bench_repeated.json
+  --repeats 7 \
+  --engine-order alternate \
+  --sleep-between-engines-ms 200 \
+  --sleep-between-runs-ms 500 \
+  --sink-warning-threshold 0.05 \
+  --bootstrap-samples 2000 \
+  --equivalence-band 0.05 \
+  --strict-sink-check \
+  --md-out tmp/feature_bench_repeated_r7.md \
+  --json-out tmp/feature_bench_repeated_r7.json
 
 .venv-bench/bin/python scripts/compare_feature_bench.py \
   --text "아버지가방에들어가신다." \
   --warmup 100 --iters 5000 \
   --batch-size 256 --batch-iters 500 \
   --input-mode varied --variant-pool 8192 \
-  --repeats 1 \
-  --md-out tmp/feature_bench_varied.md \
-  --json-out tmp/feature_bench_varied.json
+  --repeats 7 \
+  --engine-order alternate \
+  --sleep-between-engines-ms 200 \
+  --sleep-between-runs-ms 500 \
+  --sink-warning-threshold 0.05 \
+  --bootstrap-samples 2000 \
+  --equivalence-band 0.05 \
+  --strict-sink-check \
+  --md-out tmp/feature_bench_varied_r7.md \
+  --json-out tmp/feature_bench_varied_r7.json
 ```
 
-Automated weekly run (same command) is configured in `.github/workflows/feature-benchmark.yml`.
-Generated markdown/json snapshots now include benchmark environment and config metadata.
+Credibility checklist:
 
-Summary below is the median of 1 run, with min-max in brackets (same value for single-run snapshots).
+- Publish both `input_mode=repeated` (warm-cache) and `input_mode=varied` (near no-cache).
+- Keep Rust in release mode and report the exact commands (`rust_cmd`, `python_cmd`) from metadata.
+- Keep assets aligned (`KIWI_LIBRARY_PATH`, `KIWI_MODEL_PATH`) and include them in the report metadata.
+- Use at least `repeats>=5` (recommended `7`) and report variability (`CV`, `p95`, min-max).
+- Add statistical defensibility with ratio `95% bootstrap CI` and `P(ratio>1)`.
+- Review the workload parity table (`sink` ratio). Use `--strict-sink-check` in CI if you need hard guardrails.
+- Publish Git SHA + dirty status so readers can reproduce exactly.
+
+SWE metric interpretation (for strict reviewers):
+
+- Throughput winner claim should use CI, not just point ratio: report as `ratio [low, high]`.
+- If CI is fully above `1.05`, treat as robust Rust win under ±5% practical equivalence.
+- If CI crosses `[0.95, 1.05]`, report as equivalent/inconclusive instead of forcing a winner.
+- Keep startup (`init_ms`) independent from steady-state throughput conclusions.
+
+Dataset-driven benchmark (recommended for external review):
+
+```bash
+cd kiwi-rs
+mkdir -p tmp
+.venv-bench/bin/python scripts/compare_feature_bench.py \
+  --dataset-tsv benchmarks/datasets/swe_textset_v2.tsv \
+  --input-mode varied \
+  --warmup 20 --iters 300 \
+  --batch-size 128 --batch-iters 60 \
+  --repeats 5 \
+  --engine-order alternate \
+  --sleep-between-engines-ms 100 \
+  --sleep-between-runs-ms 200 \
+  --sink-warning-threshold 0.05 \
+  --bootstrap-samples 2000 \
+  --equivalence-band 0.05 \
+  --strict-sink-check \
+  --md-out tmp/feature_bench_dataset_v2.md \
+  --json-out tmp/feature_bench_dataset_v2.json
+
+.venv-bench/bin/python scripts/compare_feature_dataset.py \
+  --dataset-tsv benchmarks/datasets/swe_textset_v2.tsv \
+  --input-mode varied \
+  --warmup 20 --iters 300 \
+  --batch-size 128 --batch-iters 60 \
+  --repeats 5 \
+  --out-dir tmp/feature_dataset_matrix_v2
+```
+
+Dataset references:
+
+- Spec: `docs/benchmark_dataset_spec.md`
+- Defense guide: `docs/benchmark_defense.md`
+
+### Expanded feature benchmark snapshot (dataset v2, multi-run, 2026-02-17)
+
+Review-defense reference:
+
+- `docs/benchmark_defense.md`
+- `tmp/feature_dataset_matrix_v2_varied_r5_i300/matrix_summary.md`
+
+Commands used for this snapshot:
+
+```bash
+cd kiwi-rs
+mkdir -p tmp
+
+# warm-cache overall (repeated input)
+.venv-bench/bin/python scripts/compare_feature_bench.py \
+  --dataset-tsv benchmarks/datasets/swe_textset_v2.tsv \
+  --input-mode repeated \
+  --warmup 20 --iters 300 \
+  --batch-size 128 --batch-iters 60 \
+  --repeats 5 \
+  --engine-order alternate \
+  --sleep-between-engines-ms 100 \
+  --sleep-between-runs-ms 200 \
+  --bootstrap-samples 2000 \
+  --equivalence-band 0.05 \
+  --strict-sink-check \
+  --md-out tmp/feature_dataset_matrix_v2_repeated_r5_i300/overall.md \
+  --json-out tmp/feature_dataset_matrix_v2_repeated_r5_i300/overall.json
+
+# near no-cache dataset-stratified matrix
+.venv-bench/bin/python scripts/compare_feature_dataset.py \
+  --dataset-tsv benchmarks/datasets/swe_textset_v2.tsv \
+  --input-mode varied \
+  --warmup 20 --iters 300 \
+  --batch-size 128 --batch-iters 60 \
+  --repeats 5 \
+  --bootstrap-samples 2000 \
+  --equivalence-band 0.05 \
+  --engine-order alternate \
+  --sleep-between-engines-ms 100 \
+  --sleep-between-runs-ms 200 \
+  --out-dir tmp/feature_dataset_matrix_v2_varied_r5_i300
+```
+
+Artifacts:
+
+- repeated overall: `tmp/feature_dataset_matrix_v2_repeated_r5_i300/overall.md`
+- repeated overall json: `tmp/feature_dataset_matrix_v2_repeated_r5_i300/overall.json`
+- varied overall: `tmp/feature_dataset_matrix_v2_varied_r5_i300/overall.md`
+- varied overall json: `tmp/feature_dataset_matrix_v2_varied_r5_i300/overall.json`
+- varied category matrix: `tmp/feature_dataset_matrix_v2_varied_r5_i300/matrix_summary.md`
 
 Benchmark environment:
 
 | Item | Value |
 |---|---|
-| Timestamp (local) | 2026-02-17T17:10:06+09:00 |
+| Timestamp (local, varied overall) | 2026-02-17T20:27:29+09:00 |
 | OS | Darwin 24.6.0 |
 | Platform | macOS-15.7.4-arm64-arm-64bit-Mach-O |
 | CPU | arm64 (CPU brand unavailable in sandbox) |
@@ -334,76 +447,54 @@ Benchmark environment:
 | Python (harness) | 3.14.3 (main, Feb 3 2026, 15:32:20) [Clang 17.0.0 (clang-1700.6.3.2)] |
 | Python (bench bin) | Python 3.14.3 (`.venv-bench/bin/python`) |
 | kiwipiepy | 0.22.2 |
-| Git | `753b8dc4d648d33b5ed6f163ba2ae3cb46397a7e` (`main`, dirty=True) |
+| Git | `cfd859461801659e6dcc099f57ff23001e8934b8` (`main`, dirty=True) |
 
-Benchmark config:
+Dataset profile:
 
 | Item | Value |
 |---|---|
-| text | 아버지가방에들어가신다. |
-| warmup | 100 |
-| iters | 5000 |
-| batch_size | 256 |
-| batch_iters | 500 |
-| input_mode | repeated |
-| variant_pool | 4096 |
-| repeats | 1 |
-| join_lm_search | true |
+| path | `benchmarks/datasets/swe_textset_v2.tsv` |
+| sha256 | `8c81b8e8d0c4272f96c05e6851da10759f02361caa0a2acb881dd72e642f4696` |
+| rows | 192 |
+| unique texts | 192 |
+| categories | 8 |
+| category counts | code_mixed:24, colloquial:24, ecommerce:24, finance:24, longform:24, news:24, tech:24, typo_noisy:24 |
+| text length (char) | min=14, median=63, max=192 |
 
-Throughput comparison (`calls_per_sec`, higher is better):
+Benchmark config:
 
-| Feature | `kiwi-rs` | `kiwipiepy` | Relative (`kiwi-rs / kiwipiepy`) |
-|---|---:|---:|---:|
-| `tokenize` | 1185489.51 [1185489.51-1185489.51] | 7792.55 [7792.55-7792.55] | 152.13x |
-| `analyze_top1` | 1199112.66 [1199112.66-1199112.66] | 7612.25 [7612.25-7612.25] | 157.52x |
-| `split_into_sents` | 28908752.41 [28908752.41-28908752.41] | 3802.38 [3802.38-3802.38] | 7602.80x |
-| `split_into_sents_with_tokens` | 250558.01 [250558.01-250558.01] | 4872.41 [4872.41-4872.41] | 51.42x |
-| `space` | 357757.20 [357757.20-357757.20] | 4768.69 [4768.69-4768.69] | 75.02x |
-| `join` | 2402355.08 [2402355.08-2402355.08] | 675759.32 [675759.32-675759.32] | 3.56x |
-| `glue` | 6221490.02 [6221490.02-6221490.02] | 7613.64 [7613.64-7613.64] | 817.15x |
-| `analyze_many_loop` | 32.36 [32.36-32.36] | 27.94 [27.94-27.94] | 1.16x |
-| `analyze_many_native` | 166.11 [166.11-166.11] | 165.71 [165.71-165.71] | 1.00x |
-| `tokenize_many_loop` | 3409.24 [3409.24-3409.24] | 28.66 [28.66-28.66] | 118.95x |
-| `tokenize_many_batch` | 3134.67 [3134.67-3134.67] | 184.16 [184.16-184.16] | 17.02x |
-| `split_many_loop` | 27.87 [27.87-27.87] | 29.18 [29.18-29.18] | 0.96x |
-| `space_many_loop` | 29.39 [29.39-29.39] | 27.22 [27.22-27.22] | 1.08x |
-| `space_many_batch` | 161.79 [161.79-161.79] | 160.39 [160.39-160.39] | 1.01x |
-| `batch_analyze_native` | 166.11 [166.11-166.11] | 165.71 [165.71-165.71] | 1.00x |
+| Profile | input_mode | warmup | iters | batch_size | batch_iters | repeats | bootstrap_samples | equivalence_band | engine_order |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| repeated overall | repeated | 20 | 300 | 128 | 60 | 5 | 2000 | ±5% | alternate |
+| varied matrix | varied | 20 | 300 | 128 | 60 | 5 | 2000 | ±5% | alternate |
 
-Startup (`init_ms`, lower is better):
+Category summary (varied, per-category):
 
-| Init path | `kiwi-rs` | `kiwipiepy` |
-|---|---:|---:|
-| `Kiwi::init()` / `Kiwi()` | 1417.905 [1417.905-1417.905] ms | 680.748 [680.748-680.748] ms |
+| Category | Median Ratio | Rust Wins / Total | Worst Feature | Best Feature |
+|---|---:|---:|---|---|
+| `code_mixed` | 40.23x | 15/15 | `join` (4.29x) | `split_many_loop` (3961.64x) |
+| `colloquial` | 53.59x | 15/15 | `join` (3.98x) | `split_many_loop` (4633.05x) |
+| `ecommerce` | 53.79x | 15/15 | `join` (4.27x) | `split_many_loop` (6435.18x) |
+| `finance` | 49.18x | 15/15 | `join` (3.62x) | `split_many_loop` (7399.29x) |
+| `longform` | 56.26x | 15/15 | `join` (4.70x) | `split_many_loop` (18218.50x) |
+| `news` | 53.04x | 15/15 | `join` (3.66x) | `split_many_loop` (7721.17x) |
+| `tech` | 43.72x | 15/15 | `join` (3.12x) | `split_many_loop` (6182.83x) |
+| `typo_noisy` | 70.02x | 15/15 | `join` (3.97x) | `split_many_loop` (4048.25x) |
 
-Rust-only benchmark features:
-
-| Feature | `kiwi-rs` |
-|---|---:|
-| `join_prepared` | 277556.12 [277556.12-277556.12] |
-| `join_prepared_utf16` | 278618.79 [278618.79-278618.79] |
-| `joiner_reuse` | 3518440.85 [3518440.85-3518440.85] |
-| `joiner_reuse_utf16` | 2743359.29 [2743359.29-2743359.29] |
-
-Python-only benchmark features:
-
-| Feature | `kiwipiepy` |
-|---|---:|
-| `split_many_batch` | 181.50 [181.50-181.50] |
-
-Varied-input (near no-cache) ratio snapshot (`input_mode=varied`, `variant_pool=8192`):
+Repeated vs varied ratio snapshot (`kiwi-rs / kiwipiepy`):
 
 | Feature | Repeated Ratio | Repeated Δ% | Varied Ratio | Varied Δ% |
 |---|---:|---:|---:|---:|
-| `tokenize` | 152.13x | +15113.0% | 0.94x | -6.0% |
-| `analyze_top1` | 157.52x | +15652.0% | 1.01x | +1.0% |
-| `split_into_sents` | 7602.80x | +760180.0% | 1.16x | +16.0% |
-| `split_into_sents_with_tokens` | 51.42x | +5042.0% | 1.02x | +2.0% |
-| `glue` | 817.15x | +81615.0% | 1.15x | +15.0% |
-| `analyze_many_native` | 1.00x | +0.0% | 0.82x | -18.0% |
-| `tokenize_many_batch` | 17.02x | +1602.0% | 0.79x | -21.0% |
-| `space_many_batch` | 1.01x | +1.0% | 0.95x | -5.0% |
-| `join` | 3.56x | +256.0% | 4.37x | +337.0% |
+| `tokenize` | 156.03x | +15503.4% | 1.49x | +48.9% |
+| `analyze_top1` | 148.44x | +14744.4% | 1.00x | +0.3% |
+| `split_into_sents` | 9445.91x | +944491.2% | 1.06x | +6.4% |
+| `split_into_sents_with_tokens` | 86.64x | +8564.1% | 67.75x | +6675.4% |
+| `space` | 99.02x | +9802.0% | 1.12x | +11.8% |
+| `glue` | 542.54x | +54153.8% | 1.56x | +56.2% |
+| `join` | 4.30x | +329.9% | 3.85x | +285.1% |
+| `analyze_many_native` | 24.10x | +2309.9% | 0.92x | -7.9% |
+| `tokenize_many_batch` | 24.62x | +2362.2% | 23.18x | +2217.9% |
+| `space_many_batch` | 14.23x | +1322.6% | 0.98x | -1.7% |
 
 `Δ%` is `(kiwi-rs / kiwipiepy - 1) * 100`.  
 `+` means `kiwi-rs` is faster, `-` means slower.
@@ -415,98 +506,66 @@ xychart-beta
     title "Repeated Input Ratio (Selected)"
     x-axis ["tokenize","analyze_top1","split_with_tokens","join","analyze_many_native","tokenize_many_batch","space_many_batch"]
     y-axis "kiwi-rs / kiwipiepy (x)" 0 --> 170
-    bar [152.13,157.52,51.42,3.56,1.00,17.02,1.01]
+    bar [156.03,148.44,86.64,4.30,24.10,24.62,14.23]
 ```
 
 ```mermaid
 xychart-beta
     title "Repeated Input Ratio (Split + Glue)"
     x-axis ["split_into_sents","glue"]
-    y-axis "kiwi-rs / kiwipiepy (x)" 0 --> 8000
-    bar [7602.80,817.15]
+    y-axis "kiwi-rs / kiwipiepy (x)" 0 --> 10000
+    bar [9445.91,542.54]
 ```
 
 ```mermaid
 xychart-beta
-    title "Varied Input Ratio (Near No-Cache)"
-    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","join","analyze_many_native","tokenize_many_batch","space_many_batch"]
+    title "Varied Input Ratio (Moderate Range)"
+    x-axis ["tokenize","analyze_top1","split","space","glue","join","analyze_many_native","space_many_batch"]
     y-axis "kiwi-rs / kiwipiepy (x)" 0 --> 5
-    bar [0.94,1.01,1.16,1.02,1.10,1.15,4.37,0.82,0.79,0.95]
-```
-
-Absolute-value charts (varied input, near no-cache):
-
-- Throughput = number of calls processed per second (`calls/sec`, higher is better)
-- Latency = average time per call (`avg_ms`, lower is better)
-- `mermaid xychart-beta` can visually overlap multi-bar series in some renderers.
-- To keep readability, charts below are split by engine.
-
-```mermaid
-xychart-beta
-    title "Varied Throughput (Core Features, kiwi-rs)"
-    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
-    y-axis "calls/sec (higher is better)" 0 --> 8000
-    bar [6956.95,7319.22,5104.73,4372.13,4944.59,5692.86,158.62,151.12,150.76]
+    bar [1.49,1.00,1.06,1.12,1.56,3.85,0.92,0.98]
 ```
 
 ```mermaid
 xychart-beta
-    title "Varied Throughput (Core Features, kiwipiepy)"
-    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
-    y-axis "calls/sec (higher is better)" 0 --> 8000
-    bar [7393.81,7212.44,4399.49,4282.95,4497.21,4965.80,192.74,190.38,159.43]
+    title "Varied Input Ratio (High-Range Features)"
+    x-axis ["split_with_tokens","tokenize_many_batch"]
+    y-axis "kiwi-rs / kiwipiepy (x)" 0 --> 70
+    bar [67.75,23.18]
 ```
 
-```mermaid
-xychart-beta
-    title "Varied Throughput (Join)"
-    x-axis ["join (kiwi-rs)","join (kiwipiepy)"]
-    y-axis "calls/sec (higher is better)" 0 --> 3000000
-    bar [2927258.22,669983.08]
-```
+Throughput = calls processed per second (`calls/sec`, higher is better).
+Latency = average time per call (`avg_ms`, lower is better).
 
-```mermaid
-xychart-beta
-    title "Varied Latency (Core Features, kiwi-rs)"
-    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
-    y-axis "avg ms/call (lower is better)" 0 --> 7
-    bar [0.143741,0.136627,0.195897,0.228721,0.202241,0.175659,6.304233,6.617300,6.632977]
-```
-
-```mermaid
-xychart-beta
-    title "Varied Latency (Core Features, kiwipiepy)"
-    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
-    y-axis "avg ms/call (lower is better)" 0 --> 7
-    bar [0.135248,0.138649,0.227299,0.233484,0.222360,0.201377,5.188234,5.252784,6.272204]
-```
-
-Side-by-side numeric comparison (varied input, near no-cache):
+Side-by-side numeric comparison (varied, near no-cache):
 
 | Feature | `kiwi-rs` calls/sec | `kiwipiepy` calls/sec | Ratio (`x`) | Δ% | `kiwi-rs` avg_ms | `kiwipiepy` avg_ms |
 |---|---:|---:|---:|---:|---:|---:|
-| `tokenize` | 6956.95 | 7393.81 | 0.94x | -6.0% | 0.143741 | 0.135248 |
-| `analyze_top1` | 7319.22 | 7212.44 | 1.01x | +1.0% | 0.136627 | 0.138649 |
-| `split_into_sents` | 5104.73 | 4399.49 | 1.16x | +16.0% | 0.195897 | 0.227299 |
-| `split_into_sents_with_tokens` | 4372.13 | 4282.95 | 1.02x | +2.0% | 0.228721 | 0.233484 |
-| `space` | 4944.59 | 4497.21 | 1.10x | +10.0% | 0.202241 | 0.222360 |
-| `glue` | 5692.86 | 4965.80 | 1.15x | +15.0% | 0.175659 | 0.201377 |
-| `join` | 2927258.22 | 669983.08 | 4.37x | +337.0% | 0.000342 | 0.001493 |
-| `analyze_many_native` | 158.62 | 192.74 | 0.82x | -18.0% | 6.304233 | 5.188234 |
-| `tokenize_many_batch` | 151.12 | 190.38 | 0.79x | -21.0% | 6.617300 | 5.252784 |
-| `space_many_batch` | 150.76 | 159.43 | 0.95x | -5.0% | 6.632977 | 6.272204 |
+| `tokenize` | 3052.78 | 2049.71 | 1.49x | +48.9% | 0.327571 | 0.487874 |
+| `analyze_top1` | 2098.51 | 2092.15 | 1.00x | +0.3% | 0.476528 | 0.477976 |
+| `split_into_sents` | 2116.51 | 1990.01 | 1.06x | +6.4% | 0.472477 | 0.502509 |
+| `split_into_sents_with_tokens` | 137646.25 | 2031.56 | 67.75x | +6675.4% | 0.007265 | 0.492232 |
+| `space` | 2420.12 | 2164.93 | 1.12x | +11.8% | 0.413203 | 0.461909 |
+| `glue` | 2860.79 | 1831.72 | 1.56x | +56.2% | 0.349553 | 0.545935 |
+| `join` | 1413427.56 | 367047.46 | 3.85x | +285.1% | 0.000708 | 0.002724 |
+| `analyze_many_native` | 86.50 | 93.90 | 0.92x | -7.9% | 11.561290 | 10.650051 |
+| `tokenize_many_batch` | 2259.52 | 97.48 | 23.18x | +2217.9% | 0.442572 | 10.258036 |
+| `space_many_batch` | 92.02 | 93.64 | 0.98x | -1.7% | 10.867520 | 10.678922 |
 
-`Δ%` is `(kiwi-rs / kiwipiepy - 1) * 100`.
+Startup (`init_ms`, lower is better):
+
+| Profile | `kiwi-rs` | `kiwipiepy` |
+|---|---:|---:|
+| repeated overall | 1316.395 ms | 631.000 ms |
+| varied overall | 1326.721 ms | 622.918 ms |
 
 Interpretation:
 
-- `join` is now faster on `kiwi-rs` for repeated identical morph sequences because the default `join` path reuses an internal LRU joiner cache.
-- `split_into_sents` and `glue` are now above 1.0x even in the `varied` scenario after reducing miss-path cache overhead and reusing glue pair decisions.
-- `prepare_joiner` (`joiner_reuse*`) remains the fastest path when explicitly reusing a fixed morph sequence.
-- Repeated identical inputs show large gains on `tokenize*`, `analyze*`, and tokenized sentence split paths because internal result caches are reused.
-- For strict fairness, publish both scenarios together: `input_mode=repeated` (warm-cache) and `input_mode=varied` (near no-cache).
-- `split_many_batch` is still Python-only in this benchmark set.
-- `Kiwi::init()` includes runtime asset discovery/bootstrap checks, so startup should be evaluated separately from steady-state throughput.
+- Repeated identical input remains the warm-cache upper bound and shows large speedups for most features.
+- Varied dataset input is the publication baseline for near no-cache behavior.
+- In the varied profile, `analyze_many_native` and `space_many_batch` are close to parity and can still trail Python.
+- `join` stays consistently faster in both profiles after join-path optimizations.
+- Category-stratified varied results show `kiwi-rs` wins all common features (`15/15`) in all 8 categories.
+- Keep startup (`init_ms`) separate from steady-state throughput conclusions.
 
 ## kiwipiepy parity
 

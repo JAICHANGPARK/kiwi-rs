@@ -2,6 +2,7 @@
 import argparse
 import time
 from collections.abc import Iterable
+from pathlib import Path
 
 
 def parse_args() -> argparse.Namespace:
@@ -55,6 +56,16 @@ def parse_args() -> argparse.Namespace:
         default=4096,
         help="Variant pool size for --input-mode varied.",
     )
+    parser.add_argument(
+        "--dataset-tsv",
+        default="",
+        help="Optional dataset TSV path (`category<TAB>text`, comments with #).",
+    )
+    parser.add_argument(
+        "--dataset-category",
+        default="",
+        help="Optional dataset category filter (requires --dataset-tsv).",
+    )
     args = parser.parse_args()
     if args.warmup < 0:
         parser.error("--warmup must be >= 0")
@@ -66,6 +77,8 @@ def parse_args() -> argparse.Namespace:
         parser.error("--batch-iters must be >= 1")
     if args.variant_pool <= 0:
         parser.error("--variant-pool must be >= 1")
+    if args.dataset_category and not args.dataset_tsv:
+        parser.error("--dataset-category requires --dataset-tsv")
     raw_join_lm_search = str(args.join_lm_search).strip().lower()
     if raw_join_lm_search in {"1", "true", "yes", "on"}:
         args.join_lm_search = True
@@ -121,8 +134,45 @@ def materialize(iterable_or_value):
     return iterable_or_value
 
 
+def text_sink(value: str) -> int:
+    if not value:
+        return 0
+    return ord(value[0]) + ord(value[-1])
+
+
 def build_text_variants(base: str, count: int) -> list[str]:
     return [f"{base} [{index}]" for index in range(count)]
+
+
+def load_dataset_texts(path: str, category_filter: str = "") -> list[str]:
+    file_path = Path(path)
+    if not file_path.exists():
+        raise FileNotFoundError(f"dataset file not found: {path}")
+    texts: list[str] = []
+    wanted = category_filter.strip().lower()
+    for line_no, raw in enumerate(file_path.read_text(encoding="utf-8").splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "\t" in line:
+            category, text = line.split("\t", 1)
+            category = category.strip()
+            text = text.strip()
+        else:
+            category = "default"
+            text = line
+        if wanted and category.lower() != wanted:
+            continue
+        if not text:
+            raise ValueError(f"dataset line {line_no} has empty text")
+        texts.append(text)
+    if not texts:
+        raise ValueError("dataset selection produced zero texts")
+    return texts
+
+
+def cycle_text_pool(seed: list[str], total: int) -> list[str]:
+    return [seed[index % len(seed)] for index in range(total)]
 
 
 def pick_text(mode: str, fallback: str, pool: list[str], index: int) -> str:
@@ -148,18 +198,37 @@ def main() -> int:
     kiwi = Kiwi()
     init_ms = (time.perf_counter() - init_start) * 1000.0
 
-    split_text = f"{args.text} 두 번째 문장입니다."
-    single_variants = build_text_variants(args.text, args.variant_pool)
-    split_variants = [f"{text} 두 번째 문장입니다." for text in single_variants]
-    join_tokens = kiwi.tokenize(args.text, match_options=Match.ALL)
+    if args.dataset_tsv:
+        single_variants = load_dataset_texts(args.dataset_tsv, args.dataset_category)
+    else:
+        single_variants = build_text_variants(args.text, args.variant_pool)
+    if len(single_variants) > args.variant_pool:
+        single_variants = single_variants[: args.variant_pool]
+
+    split_text = single_variants[0] if args.dataset_tsv else f"{args.text} 두 번째 문장입니다."
+    split_variants = (
+        list(single_variants)
+        if args.dataset_tsv
+        else [f"{text} 두 번째 문장입니다." for text in single_variants]
+    )
+    join_seed_text = single_variants[0] if single_variants else args.text
+    join_tokens = kiwi.tokenize(join_seed_text, match_options=Match.ALL)
     glue_chunks = ["오늘은", "날씨가", "좋다."]
     glue_variant_pool = [[text, "날씨가", "좋다."] for text in single_variants]
-    batch_texts = [f"{args.text} {i}" for i in range(args.batch_size)]
+    batch_texts = (
+        cycle_text_pool(single_variants, args.batch_size)
+        if args.dataset_tsv
+        else [f"{args.text} {i}" for i in range(args.batch_size)]
+    )
     batch_pool_size = round_batch_pool_size(
         max(args.variant_pool, args.batch_size * 64),
         args.batch_size,
     )
-    batch_text_pool = [f"{args.text} {i} {i % 17}" for i in range(batch_pool_size)]
+    batch_text_pool = (
+        cycle_text_pool(single_variants, batch_pool_size)
+        if args.dataset_tsv
+        else [f"{args.text} {i} {i % 17}" for i in range(batch_pool_size)]
+    )
     batch_groups = [
         batch_text_pool[offset : offset + args.batch_size]
         for offset in range(0, len(batch_text_pool), args.batch_size)
@@ -174,6 +243,9 @@ def main() -> int:
     print(f"join_lm_search={str(args.join_lm_search).lower()}")
     print(f"input_mode={args.input_mode}")
     print(f"variant_pool={args.variant_pool}")
+    print(f"dataset_tsv={args.dataset_tsv}")
+    print(f"dataset_category={args.dataset_category}")
+    print(f"dataset_entries={len(single_variants)}")
     print(f"init_ms={init_ms:.3f}")
 
     tokenize_round = [0]
@@ -235,7 +307,7 @@ def main() -> int:
     def space_len():
         text = pick_text(args.input_mode, split_text, split_variants, space_round[0])
         space_round[0] += 1
-        return len(kiwi.space(text, reset_whitespace=True))
+        return text_sink(kiwi.space(text, reset_whitespace=True))
 
     run_bench("space", args.warmup, args.iters, space_len)
 
@@ -243,7 +315,7 @@ def main() -> int:
         "join",
         args.warmup,
         args.iters,
-        lambda: len(kiwi.join(join_tokens, lm_search=args.join_lm_search)),
+        lambda: text_sink(kiwi.join(join_tokens, lm_search=args.join_lm_search)),
     )
 
     glue_round = [0]
@@ -254,7 +326,7 @@ def main() -> int:
             glue_round[0] += 1
         else:
             chunks = glue_chunks
-        return len(kiwi.glue(chunks))
+        return text_sink(kiwi.glue(chunks))
 
     run_bench("glue", args.warmup, args.iters, glue_len)
 
@@ -342,7 +414,7 @@ def main() -> int:
         batch = pick_batch(space_many_loop_round)
         total = 0
         for text in batch:
-            total += len(kiwi.space(text, reset_whitespace=True))
+            total += text_sink(kiwi.space(text, reset_whitespace=True))
         return total
 
     run_bench("space_many_loop", args.warmup, args.batch_iters, space_many_loop_len)
@@ -352,7 +424,7 @@ def main() -> int:
     def space_many_batch_len():
         batch = pick_batch(space_many_batch_round)
         batches = materialize(kiwi.space(batch, reset_whitespace=True))
-        return sum(len(text) for text in batches)
+        return sum(text_sink(text) for text in batches)
 
     run_bench("space_many_batch", args.warmup, args.batch_iters, space_many_batch_len)
 

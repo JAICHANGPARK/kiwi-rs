@@ -29,24 +29,30 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install kiwipiepy
 
-      - name: Run feature comparison benchmark
+      - name: Run dataset-stratified feature benchmark
         run: |
           mkdir -p tmp
-          python scripts/compare_feature_bench.py \
-            --text "아버지가방에들어가신다." \
-            --warmup 50 --iters 2000 \
-            --batch-size 128 --batch-iters 200 \
-            --repeats 3 \
-            --md-out tmp/feature_bench_snapshot.md \
-            --json-out tmp/feature_bench_snapshot.json
+          python scripts/compare_feature_dataset.py \
+            --dataset-tsv benchmarks/datasets/swe_textset_v2.tsv \
+            --input-mode varied \
+            --warmup 20 --iters 300 \
+            --batch-size 128 --batch-iters 60 \
+            --repeats 5 \
+            --engine-order alternate \
+            --sleep-between-engines-ms 100 \
+            --sleep-between-runs-ms 200 \
+            --bootstrap-samples 2000 \
+            --equivalence-band 0.05 \
+            --out-dir tmp/feature_dataset_matrix_v2
 
       - name: Append benchmark summary
-        run: cat tmp/feature_bench_snapshot.md >> "$GITHUB_STEP_SUMMARY"
+        run: |
+          cat tmp/feature_dataset_matrix_v2/matrix_summary.md >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          cat tmp/feature_dataset_matrix_v2/overall.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload benchmark artifacts
         uses: actions/upload-artifact@v4
         with:
           name: feature-bench-${{ github.run_id }}
-          path: |
-            tmp/feature_bench_snapshot.md
-            tmp/feature_bench_snapshot.json
+          path: tmp/feature_dataset_matrix_v2

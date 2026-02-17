@@ -1,5 +1,7 @@
 use std::env;
+use std::fs::File;
 use std::hint::black_box;
+use std::io::{BufRead, BufReader};
 use std::time::Instant;
 
 use kiwi_rs::{AnalyzeOptions, Kiwi, Sentence, KIWI_MATCH_ALL};
@@ -20,6 +22,8 @@ struct Cli {
     join_lm_search: bool,
     input_mode: InputMode,
     variant_pool: usize,
+    dataset_tsv: Option<String>,
+    dataset_category: Option<String>,
 }
 
 #[derive(Debug)]
@@ -33,7 +37,7 @@ struct BenchResult {
 
 fn print_usage() {
     eprintln!(
-        "Usage: cargo run --release --example bench_features -- [--text <text>] [--warmup <n>] [--iters <n>] [--batch-size <n>] [--batch-iters <n>] [--join-lm-search <true|false>] [--input-mode <repeated|varied>] [--variant-pool <n>]"
+        "Usage: cargo run --release --example bench_features -- [--text <text>] [--warmup <n>] [--iters <n>] [--batch-size <n>] [--batch-iters <n>] [--join-lm-search <true|false>] [--input-mode <repeated|varied>] [--variant-pool <n>] [--dataset-tsv <path>] [--dataset-category <name>]"
     );
 }
 
@@ -72,6 +76,8 @@ fn parse_args() -> Result<Cli, String> {
     let mut join_lm_search = true;
     let mut input_mode = InputMode::Repeated;
     let mut variant_pool = 4096usize;
+    let mut dataset_tsv: Option<String> = None;
+    let mut dataset_category: Option<String> = None;
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -90,6 +96,18 @@ fn parse_args() -> Result<Cli, String> {
             }
             "--input-mode" => input_mode = parse_input_mode_flag("--input-mode", args.next())?,
             "--variant-pool" => variant_pool = parse_usize_flag("--variant-pool", args.next())?,
+            "--dataset-tsv" => {
+                dataset_tsv = Some(
+                    args.next()
+                        .ok_or_else(|| "--dataset-tsv requires a value".to_string())?,
+                )
+            }
+            "--dataset-category" => {
+                dataset_category = Some(
+                    args.next()
+                        .ok_or_else(|| "--dataset-category requires a value".to_string())?,
+                )
+            }
             "--help" | "-h" => {
                 print_usage();
                 std::process::exit(0);
@@ -110,6 +128,9 @@ fn parse_args() -> Result<Cli, String> {
     if variant_pool == 0 {
         return Err("--variant-pool must be >= 1".to_string());
     }
+    if dataset_category.is_some() && dataset_tsv.is_none() {
+        return Err("--dataset-category requires --dataset-tsv".to_string());
+    }
 
     Ok(Cli {
         text,
@@ -120,6 +141,8 @@ fn parse_args() -> Result<Cli, String> {
         join_lm_search,
         input_mode,
         variant_pool,
+        dataset_tsv,
+        dataset_category,
     })
 }
 
@@ -184,9 +207,59 @@ fn sentence_payload_size(sentences: &[Sentence]) -> usize {
     sentences.iter().map(visit).sum()
 }
 
+fn text_sink(value: &str) -> usize {
+    let mut chars = value.chars();
+    let Some(first) = chars.next() else {
+        return 0;
+    };
+    let last = chars.next_back().unwrap_or(first);
+    (first as usize).wrapping_add(last as usize)
+}
+
 fn build_text_variants(base: &str, count: usize) -> Vec<String> {
     (0..count)
         .map(|index| format!("{base} [{index}]"))
+        .collect()
+}
+
+fn load_dataset_texts(path: &str, category_filter: Option<&str>) -> Result<Vec<String>, String> {
+    let file = File::open(path)
+        .map_err(|error| format!("failed to open dataset file '{path}': {error}"))?;
+    let reader = BufReader::new(file);
+    let mut texts = Vec::new();
+    for (index, line_result) in reader.lines().enumerate() {
+        let line_number = index + 1;
+        let line = line_result
+            .map_err(|error| format!("failed to read dataset line {line_number}: {error}"))?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        let (category, text) = if let Some((cat, value)) = trimmed.split_once('\t') {
+            (cat.trim(), value.trim())
+        } else {
+            ("default", trimmed)
+        };
+        if category_filter
+            .map(|wanted| !wanted.eq_ignore_ascii_case(category))
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        if text.is_empty() {
+            return Err(format!("dataset line {line_number} has empty text"));
+        }
+        texts.push(text.to_string());
+    }
+    if texts.is_empty() {
+        return Err("dataset selection produced zero texts".to_string());
+    }
+    Ok(texts)
+}
+
+fn cycle_text_pool(seed: &[String], total: usize) -> Vec<String> {
+    (0..total)
+        .map(|index| seed[index % seed.len()].clone())
         .collect()
 }
 
@@ -218,12 +291,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let options_top1 = AnalyzeOptions::default()
         .with_top_n(1)
         .with_match_options(KIWI_MATCH_ALL);
-    let split_text = format!("{} 두 번째 문장입니다.", cli.text);
-    let single_variants = build_text_variants(&cli.text, cli.variant_pool);
-    let split_variants: Vec<String> = single_variants
-        .iter()
-        .map(|text| format!("{text} 두 번째 문장입니다."))
-        .collect();
+    let mut single_variants = if let Some(path) = cli.dataset_tsv.as_deref() {
+        load_dataset_texts(path, cli.dataset_category.as_deref())?
+    } else {
+        build_text_variants(&cli.text, cli.variant_pool)
+    };
+    if single_variants.len() > cli.variant_pool {
+        single_variants.truncate(cli.variant_pool);
+    }
+    let split_text = if cli.dataset_tsv.is_some() {
+        single_variants
+            .first()
+            .cloned()
+            .unwrap_or_else(|| cli.text.clone())
+    } else {
+        format!("{} 두 번째 문장입니다.", cli.text)
+    };
+    let split_variants: Vec<String> = if cli.dataset_tsv.is_some() {
+        single_variants.clone()
+    } else {
+        single_variants
+            .iter()
+            .map(|text| format!("{text} 두 번째 문장입니다."))
+            .collect()
+    };
     let glue_chunks = vec![
         "오늘은".to_string(),
         "날씨가".to_string(),
@@ -234,7 +325,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .map(|text| vec![text.clone(), "날씨가".to_string(), "좋다.".to_string()])
         .collect();
 
-    let join_tokens = kiwi.tokenize_with_match_options(&cli.text, KIWI_MATCH_ALL)?;
+    let join_seed_text = single_variants
+        .first()
+        .map(String::as_str)
+        .unwrap_or(cli.text.as_str());
+    let join_tokens = kiwi.tokenize_with_match_options(join_seed_text, KIWI_MATCH_ALL)?;
     let join_owned: Vec<(String, String)> = join_tokens
         .iter()
         .map(|token| (token.form.clone(), token.tag.clone()))
@@ -246,14 +341,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let join_prepared = kiwi.prepare_join_morphs(&join_pairs)?;
     let joiner_reuse = kiwi.prepare_joiner(&join_prepared, cli.join_lm_search)?;
 
-    let batch_texts: Vec<String> = (0..cli.batch_size)
-        .map(|index| format!("{} {}", cli.text, index))
-        .collect();
+    let batch_texts: Vec<String> = if cli.dataset_tsv.is_some() {
+        cycle_text_pool(&single_variants, cli.batch_size)
+    } else {
+        (0..cli.batch_size)
+            .map(|index| format!("{} {}", cli.text, index))
+            .collect()
+    };
     let batch_pool_size =
         round_batch_pool_size(cli.variant_pool.max(cli.batch_size * 64), cli.batch_size);
-    let batch_text_pool: Vec<String> = (0..batch_pool_size)
-        .map(|index| format!("{} {} {}", cli.text, index, index % 17))
-        .collect();
+    let batch_text_pool: Vec<String> = if cli.dataset_tsv.is_some() {
+        cycle_text_pool(&single_variants, batch_pool_size)
+    } else {
+        (0..batch_pool_size)
+            .map(|index| format!("{} {} {}", cli.text, index, index % 17))
+            .collect()
+    };
     let batch_round_count = batch_text_pool.len() / cli.batch_size;
 
     println!("engine=kiwi-rs");
@@ -271,6 +374,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     );
     println!("variant_pool={}", cli.variant_pool);
+    println!("dataset_tsv={}", cli.dataset_tsv.as_deref().unwrap_or(""));
+    println!(
+        "dataset_category={}",
+        cli.dataset_category.as_deref().unwrap_or("")
+    );
+    println!("dataset_entries={}", single_variants.len());
     println!("init_ms={:.3}", init_elapsed);
 
     let mut tokenize_round = 0usize;
@@ -328,37 +437,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let space = run_bench("space", cli.warmup, cli.iters, || {
         let text = pick_text(cli.input_mode, &split_text, &split_variants, space_round);
         space_round = space_round.wrapping_add(1);
-        Ok(kiwi.space(text, true)?.len())
+        Ok(text_sink(&kiwi.space(text, true)?))
     })?;
     print_result(&space);
 
     let join = run_bench("join", cli.warmup, cli.iters, || {
-        Ok(kiwi.join(&join_pairs, cli.join_lm_search)?.len())
+        Ok(text_sink(&kiwi.join(&join_pairs, cli.join_lm_search)?))
     })?;
     print_result(&join);
 
     let join_prepared_bench = run_bench("join_prepared", cli.warmup, cli.iters, || {
-        Ok(kiwi
-            .join_prepared(&join_prepared, cli.join_lm_search)?
-            .len())
+        Ok(text_sink(
+            &kiwi.join_prepared(&join_prepared, cli.join_lm_search)?,
+        ))
     })?;
     print_result(&join_prepared_bench);
 
     let join_prepared_utf16_bench =
         run_bench("join_prepared_utf16", cli.warmup, cli.iters, || {
-            Ok(kiwi
-                .join_prepared_utf16(&join_prepared, cli.join_lm_search)?
-                .len())
+            Ok(text_sink(
+                &kiwi.join_prepared_utf16(&join_prepared, cli.join_lm_search)?,
+            ))
         })?;
     print_result(&join_prepared_utf16_bench);
 
     let joiner_reuse_bench = run_bench("joiner_reuse", cli.warmup, cli.iters, || {
-        Ok(joiner_reuse.get()?.len())
+        Ok(text_sink(&joiner_reuse.get()?))
     })?;
     print_result(&joiner_reuse_bench);
 
     let joiner_reuse_utf16_bench = run_bench("joiner_reuse_utf16", cli.warmup, cli.iters, || {
-        Ok(joiner_reuse.get_utf16()?.len())
+        Ok(text_sink(&joiner_reuse.get_utf16()?))
     })?;
     print_result(&joiner_reuse_utf16_bench);
 
@@ -371,7 +480,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         } else {
             &glue_chunks
         };
-        Ok(kiwi.glue(chunks)?.len())
+        Ok(text_sink(&kiwi.glue(chunks)?))
     })?;
     print_result(&glue);
 
@@ -472,7 +581,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         let mut total = 0usize;
         for text in batch {
-            total = total.wrapping_add(kiwi.space(text, true)?.len());
+            total = total.wrapping_add(text_sink(&kiwi.space(text, true)?));
         }
         Ok(total)
     })?;
@@ -488,7 +597,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             &batch_texts
         };
         let results = kiwi.space_many(batch, true)?;
-        Ok(results.iter().map(String::len).sum())
+        Ok(results.iter().map(|text| text_sink(text)).sum())
     })?;
     print_result(&space_many_batch);
 

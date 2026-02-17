@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 import argparse
+import hashlib
 import json
 import os
 import platform
+import random
 import re
 import statistics
 import subprocess
 import sys
+import time
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +20,8 @@ FEATURE_RE = re.compile(
 )
 INIT_RE = re.compile(r"^init_ms=([0-9.]+)$")
 ENGINE_RE = re.compile(r"^engine=([^\s]+)$")
+RUST_ENGINE = "kiwi-rs"
+PY_ENGINE = "kiwipiepy"
 
 
 @dataclass
@@ -57,12 +62,68 @@ def parse_args() -> argparse.Namespace:
         default=4096,
         help="Variant pool size for --input-mode varied.",
     )
-    parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument(
+        "--dataset-tsv",
+        default="",
+        help="Optional dataset TSV (`category<TAB>text`, comments with #).",
+    )
+    parser.add_argument(
+        "--dataset-category",
+        default="",
+        help="Optional dataset category filter (requires --dataset-tsv).",
+    )
+    parser.add_argument(
+        "--repeats",
+        type=int,
+        default=3,
+        help="How many full benchmark rounds to execute.",
+    )
     parser.add_argument(
         "--join-lm-search",
         type=str,
         default="true",
         help="Whether join uses LM search (true/false).",
+    )
+    parser.add_argument(
+        "--engine-order",
+        choices=("alternate", "rust-first", "python-first"),
+        default="alternate",
+        help="Execution order policy between engines.",
+    )
+    parser.add_argument(
+        "--sleep-between-engines-ms",
+        type=int,
+        default=0,
+        help="Sleep milliseconds between two engine runs in the same repeat.",
+    )
+    parser.add_argument(
+        "--sleep-between-runs-ms",
+        type=int,
+        default=0,
+        help="Sleep milliseconds between repeats.",
+    )
+    parser.add_argument(
+        "--sink-warning-threshold",
+        type=float,
+        default=0.05,
+        help="Allowed sink ratio deviation from 1.0 before warning (0.05 = 5%%).",
+    )
+    parser.add_argument(
+        "--bootstrap-samples",
+        type=int,
+        default=2000,
+        help="Bootstrap sample count for throughput ratio 95%% CI.",
+    )
+    parser.add_argument(
+        "--equivalence-band",
+        type=float,
+        default=0.05,
+        help="Practical-equivalence band around 1.0 ratio (0.05 = ±5%%).",
+    )
+    parser.add_argument(
+        "--strict-sink-check",
+        action="store_true",
+        help="Fail with non-zero exit when sink parity warning appears.",
     )
     parser.add_argument(
         "--python-bin",
@@ -87,8 +148,30 @@ def parse_args() -> argparse.Namespace:
         args.join_lm_search = "false"
     else:
         parser.error("--join-lm-search must be true/false")
+    if args.warmup < 0:
+        parser.error("--warmup must be >= 0")
+    if args.iters <= 0:
+        parser.error("--iters must be >= 1")
+    if args.batch_size <= 0:
+        parser.error("--batch-size must be >= 1")
+    if args.batch_iters <= 0:
+        parser.error("--batch-iters must be >= 1")
     if args.variant_pool <= 0:
         parser.error("--variant-pool must be >= 1")
+    if args.dataset_category and not args.dataset_tsv:
+        parser.error("--dataset-category requires --dataset-tsv")
+    if args.repeats <= 0:
+        parser.error("--repeats must be >= 1")
+    if args.sleep_between_engines_ms < 0:
+        parser.error("--sleep-between-engines-ms must be >= 0")
+    if args.sleep_between_runs_ms < 0:
+        parser.error("--sleep-between-runs-ms must be >= 0")
+    if args.sink_warning_threshold < 0:
+        parser.error("--sink-warning-threshold must be >= 0")
+    if args.bootstrap_samples <= 0:
+        parser.error("--bootstrap-samples must be >= 1")
+    if args.equivalence_band < 0:
+        parser.error("--equivalence-band must be >= 0")
     return args
 
 
@@ -238,9 +321,85 @@ def collect_environment(cwd: Path, python_bin: str) -> dict[str, object]:
         "python_bench_bin": python_bin,
         "python_bench_bin_version": python_bin_version,
         "kiwipiepy": kiwipiepy_version,
+        "kiwi_library_path": os.environ.get("KIWI_LIBRARY_PATH", ""),
+        "kiwi_model_path": os.environ.get("KIWI_MODEL_PATH", ""),
         "git_head": git_head,
         "git_branch": git_branch,
         "git_dirty": git_dirty,
+    }
+
+
+def load_dataset_rows(path: str) -> list[tuple[str, str]]:
+    dataset_path = Path(path)
+    if not dataset_path.exists():
+        raise RuntimeError(f"dataset file not found: {path}")
+    rows: list[tuple[str, str]] = []
+    for line_no, raw in enumerate(
+        dataset_path.read_text(encoding="utf-8", errors="replace").splitlines(),
+        start=1,
+    ):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "\t" in line:
+            category, text = line.split("\t", 1)
+            category = category.strip() or "default"
+            text = text.strip()
+        else:
+            category = "default"
+            text = line
+        if not text:
+            raise RuntimeError(f"dataset line {line_no} has empty text")
+        rows.append((category, text))
+    if not rows:
+        raise RuntimeError("dataset file has no usable rows")
+    return rows
+
+
+def filter_dataset_rows(
+    rows: list[tuple[str, str]],
+    category_filter: str,
+) -> list[tuple[str, str]]:
+    if not category_filter:
+        return list(rows)
+    wanted = category_filter.strip().lower()
+    filtered = [(category, text) for category, text in rows if category.lower() == wanted]
+    if not filtered:
+        raise RuntimeError(
+            f"dataset category '{category_filter}' produced zero rows"
+        )
+    return filtered
+
+
+def dataset_sha256(path: str) -> str:
+    digest = hashlib.sha256()
+    with Path(path).open("rb") as fp:
+        while True:
+            chunk = fp.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def dataset_audit(rows: list[tuple[str, str]]) -> dict[str, object]:
+    category_counts: dict[str, int] = {}
+    lengths: list[int] = []
+    unique_texts: set[str] = set()
+    for category, text in rows:
+        category_counts[category] = category_counts.get(category, 0) + 1
+        lengths.append(len(text))
+        unique_texts.add(text)
+    sorted_categories = sorted(category_counts.items(), key=lambda item: item[0])
+    category_text = ", ".join(f"{name}:{count}" for name, count in sorted_categories)
+    return {
+        "rows": len(rows),
+        "unique_texts": len(unique_texts),
+        "categories": len(category_counts),
+        "category_counts": category_text,
+        "char_len_min": min(lengths),
+        "char_len_median": int(median([float(value) for value in lengths])),
+        "char_len_max": max(lengths),
     }
 
 
@@ -305,8 +464,92 @@ def median(values: list[float]) -> float:
     return float(statistics.median(values))
 
 
+def percentile(values: list[float], q: float) -> float:
+    if not values:
+        return 0.0
+    sorted_values = sorted(values)
+    if len(sorted_values) == 1:
+        return float(sorted_values[0])
+    pos = (len(sorted_values) - 1) * q
+    lower = int(pos)
+    upper = min(lower + 1, len(sorted_values) - 1)
+    weight = pos - lower
+    return float(sorted_values[lower] * (1.0 - weight) + sorted_values[upper] * weight)
+
+
+def cv_percent(values: list[float]) -> float:
+    if len(values) <= 1:
+        return 0.0
+    mean_value = statistics.mean(values)
+    if mean_value == 0:
+        return 0.0
+    return float(statistics.stdev(values) / mean_value * 100.0)
+
+
+def bootstrap_ratio_ci(
+    rust_values: list[float],
+    py_values: list[float],
+    samples: int,
+) -> tuple[float, float, float, float]:
+    if not rust_values or not py_values:
+        return 0.0, 0.0, 0.0, 0.0
+
+    rng = random.Random(42)
+    n_rust = len(rust_values)
+    n_py = len(py_values)
+    ratios: list[float] = []
+    for _ in range(samples):
+        rust_sample = [rust_values[rng.randrange(n_rust)] for _ in range(n_rust)]
+        py_sample = [py_values[rng.randrange(n_py)] for _ in range(n_py)]
+        rust_med = median(rust_sample)
+        py_med = median(py_sample)
+        if py_med <= 0.0:
+            continue
+        ratios.append(rust_med / py_med)
+
+    if not ratios:
+        return 0.0, 0.0, 0.0, 0.0
+
+    low = percentile(ratios, 0.025)
+    med = percentile(ratios, 0.5)
+    high = percentile(ratios, 0.975)
+    prob_gt_one = sum(1 for value in ratios if value > 1.0) / len(ratios)
+    return low, med, high, prob_gt_one
+
+
+def ratio_decision(ci_low: float, ci_high: float, equivalence_band: float) -> str:
+    lower_eq = 1.0 - equivalence_band
+    upper_eq = 1.0 + equivalence_band
+    if ci_low > upper_eq:
+        return "kiwi-rs faster (robust)"
+    if ci_high < lower_eq:
+        return "kiwipiepy faster (robust)"
+    if ci_low >= lower_eq and ci_high <= upper_eq:
+        return "practically equivalent"
+    if ci_low > 1.0:
+        return "kiwi-rs likely faster"
+    if ci_high < 1.0:
+        return "kiwipiepy likely faster"
+    return "inconclusive"
+
+
 def fmt_med_range(values: list[float], digits: int = 2) -> str:
     return f"{median(values):.{digits}f} [{min(values):.{digits}f}-{max(values):.{digits}f}]"
+
+
+def fmt_cv(values: list[float]) -> str:
+    return f"{cv_percent(values):.2f}%"
+
+
+def feature_sink_ratio(
+    rust_values: list[int],
+    py_values: list[int],
+) -> float:
+    rust_med = median([float(value) for value in rust_values])
+    py_med = median([float(value) for value in py_values])
+    if py_med == 0.0:
+        return 1.0 if rust_med == 0.0 else float("inf")
+    return rust_med / py_med
 
 
 def aggregate(runs: list[RunSample]) -> dict[str, object]:
@@ -323,10 +566,18 @@ def aggregate(runs: list[RunSample]) -> dict[str, object]:
         engine_bucket["init_ms"].append(run.init_ms)
         for feature, sample in run.features.items():
             feature_bucket = engine_bucket["features"].setdefault(
-                feature, {"avg_ms": [], "calls_per_sec": []}
+                feature,
+                {
+                    "avg_ms": [],
+                    "calls_per_sec": [],
+                    "sink": [],
+                    "iters": [],
+                },
             )
             feature_bucket["avg_ms"].append(sample.avg_ms)
             feature_bucket["calls_per_sec"].append(sample.calls_per_sec)
+            feature_bucket["sink"].append(sample.sink)
+            feature_bucket["iters"].append(sample.iters)
     return by_engine
 
 
@@ -335,9 +586,12 @@ def build_markdown(
     repeats: int,
     environment: dict[str, object],
     benchmark_config: dict[str, object],
-    rust_engine: str = "kiwi-rs",
-    py_engine: str = "kiwipiepy",
-) -> str:
+    sink_warning_threshold: float,
+    bootstrap_samples: int,
+    equivalence_band: float,
+    rust_engine: str = RUST_ENGINE,
+    py_engine: str = PY_ENGINE,
+) -> tuple[str, list[str]]:
     if rust_engine not in agg or py_engine not in agg:
         raise RuntimeError(
             f"expected engines '{rust_engine}' and '{py_engine}', got: {', '.join(agg.keys())}"
@@ -352,10 +606,12 @@ def build_markdown(
     common = [feature for feature in rust_order if feature in py_features]
     rust_only = [feature for feature in rust_order if feature not in py_features]
     py_only = [feature for feature in py_features.keys() if feature not in rust_features]
+    sink_warnings: list[str] = []
+    decision_rows: list[tuple[str, float, float, float, float, str]] = []
 
-    lines = []
+    lines: list[str] = []
     lines.append(
-        f"### Expanded Feature Benchmark Snapshot (median of {repeats} runs, min-max shown)"
+        f"### Expanded Feature Benchmark Snapshot (median of {repeats} runs, min-max + p95/CV shown)"
     )
     lines.append("")
     lines.append("Benchmark environment:")
@@ -377,6 +633,8 @@ def build_markdown(
         f"| Python (bench bin) | {md_value(environment.get('python_bench_bin_version'))} (`{md_value(environment.get('python_bench_bin'))}`) |"
     )
     lines.append(f"| kiwipiepy | {md_value(environment.get('kiwipiepy'))} |")
+    lines.append(f"| KIWI_LIBRARY_PATH | {md_value(environment.get('kiwi_library_path'))} |")
+    lines.append(f"| KIWI_MODEL_PATH | {md_value(environment.get('kiwi_model_path'))} |")
     lines.append(
         f"| Git | `{md_value(environment.get('git_head'))}` ({md_value(environment.get('git_branch'))}, dirty={md_value(environment.get('git_dirty'))}) |"
     )
@@ -387,15 +645,37 @@ def build_markdown(
     lines.append("|---|---|")
     for key, value in benchmark_config.items():
         lines.append(f"| {md_value(key)} | {md_value(value)} |")
+    if benchmark_config.get("dataset_tsv"):
+        lines.append("")
+        lines.append("Dataset profile:")
+        lines.append("")
+        lines.append("| Item | Value |")
+        lines.append("|---|---|")
+        lines.append(f"| path | {md_value(benchmark_config.get('dataset_tsv'))} |")
+        lines.append(
+            f"| category filter | {md_value(benchmark_config.get('dataset_category'))} |"
+        )
+        lines.append(f"| sha256 | `{md_value(benchmark_config.get('dataset_sha256'))}` |")
+        lines.append(f"| rows | {md_value(benchmark_config.get('dataset_rows'))} |")
+        lines.append(
+            f"| unique texts | {md_value(benchmark_config.get('dataset_unique_texts'))} |"
+        )
+        lines.append(
+            f"| categories | {md_value(benchmark_config.get('dataset_categories'))} |"
+        )
+        lines.append(
+            f"| category counts | {md_value(benchmark_config.get('dataset_category_counts'))} |"
+        )
+        lines.append(
+            f"| text length (char) | min={md_value(benchmark_config.get('dataset_char_len_min'))}, median={md_value(benchmark_config.get('dataset_char_len_median'))}, max={md_value(benchmark_config.get('dataset_char_len_max'))} |"
+        )
+    lines.append("")
+    lines.append("Throughput comparison (`calls_per_sec`, higher is better):")
     lines.append("")
     lines.append(
-        "Throughput comparison (`calls_per_sec`, higher is better):"
+        "| Feature | `kiwi-rs` | `kiwipiepy` | Relative (`kiwi-rs / kiwipiepy`) | 95% CI (bootstrap) | P(`ratio > 1`) | `kiwi-rs` CV | `kiwipiepy` CV |"
     )
-    lines.append("")
-    lines.append(
-        "| Feature | `kiwi-rs` | `kiwipiepy` | Relative (`kiwi-rs / kiwipiepy`) |"
-    )
-    lines.append("|---|---:|---:|---:|")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
 
     for feature in common:
         rust_calls = rust_features[feature]["calls_per_sec"]
@@ -403,59 +683,164 @@ def build_markdown(
         rust_med = median(rust_calls)
         py_med = median(py_calls)
         ratio = rust_med / py_med if py_med > 0 else 0.0
-        lines.append(
-            f"| `{feature}` | {fmt_med_range(rust_calls)} | {fmt_med_range(py_calls)} | {ratio:.2f}x |"
+        ci_low, _, ci_high, prob_gt_one = bootstrap_ratio_ci(
+            rust_calls,
+            py_calls,
+            bootstrap_samples,
         )
+        decision = ratio_decision(ci_low, ci_high, equivalence_band)
+        decision_rows.append((feature, ratio, ci_low, ci_high, prob_gt_one, decision))
+        lines.append(
+            (
+                f"| `{feature}` | {fmt_med_range(rust_calls)} | {fmt_med_range(py_calls)} "
+                f"| {ratio:.2f}x | [{ci_low:.2f}, {ci_high:.2f}]x | {prob_gt_one:.3f} "
+                f"| {fmt_cv(rust_calls)} | {fmt_cv(py_calls)} |"
+            )
+        )
+
+    lines.append("")
+    lines.append("Stability snapshot (`calls_per_sec` p95):")
+    lines.append("")
+    lines.append("| Feature | `kiwi-rs` p95 | `kiwipiepy` p95 |")
+    lines.append("|---|---:|---:|")
+    for feature in common:
+        rust_calls = rust_features[feature]["calls_per_sec"]
+        py_calls = py_features[feature]["calls_per_sec"]
+        lines.append(
+            f"| `{feature}` | {percentile(rust_calls, 0.95):.2f} | {percentile(py_calls, 0.95):.2f} |"
+        )
+
+    lines.append("")
+    lines.append("Workload parity check (`sink`, should be near 1.0x):")
+    lines.append("")
+    lines.append(
+        f"Warning threshold: ±{sink_warning_threshold * 100.0:.1f}% around 1.0x."
+    )
+    lines.append("")
+    lines.append(
+        "| Feature | `kiwi-rs` sink | `kiwipiepy` sink | Sink ratio (`kiwi-rs / kiwipiepy`) | Status |"
+    )
+    lines.append("|---|---:|---:|---:|---|")
+    for feature in common:
+        rust_sink = rust_features[feature]["sink"]
+        py_sink = py_features[feature]["sink"]
+        ratio = feature_sink_ratio(rust_sink, py_sink)
+        status = "ok"
+        if ratio == float("inf") or abs(ratio - 1.0) > sink_warning_threshold:
+            status = "review"
+            sink_warnings.append(feature)
+        lines.append(
+            f"| `{feature}` | {fmt_med_range([float(v) for v in rust_sink], 2)} | {fmt_med_range([float(v) for v in py_sink], 2)} | {ratio:.4f}x | {status} |"
+        )
+    if sink_warnings:
+        warning_list = ", ".join(f"`{feature}`" for feature in sink_warnings)
+        lines.append("")
+        lines.append(f"Sink warning features: {warning_list}")
+
+    lines.append("")
+    lines.append("SWE-style decision table (throughput ratio hypothesis):")
+    lines.append("")
+    lines.append(
+        f"Equivalence band: ±{equivalence_band * 100.0:.1f}% around 1.0x. Bootstrap samples: {bootstrap_samples}."
+    )
+    lines.append("")
+    lines.append("| Feature | Ratio | 95% CI | P(`ratio > 1`) | Decision |")
+    lines.append("|---|---:|---:|---:|---|")
+    for feature, ratio, ci_low, ci_high, prob_gt_one, decision in decision_rows:
+        lines.append(
+            f"| `{feature}` | {ratio:.2f}x | [{ci_low:.2f}, {ci_high:.2f}]x | {prob_gt_one:.3f} | {decision} |"
+        )
+
+    lines.append("")
+    lines.append("SWE defensibility scorecard:")
+    lines.append("")
+    lines.append("| Check | Status | Note |")
+    lines.append("|---|---|---|")
+    status_repeats = "pass" if repeats >= 5 else "warn"
+    lines.append(
+        f"| Run count (`repeats >= 5`) | {status_repeats} | current={repeats} |"
+    )
+    status_order = (
+        "pass" if benchmark_config.get("engine_order") == "alternate" else "warn"
+    )
+    lines.append(
+        f"| Order bias control (`engine_order=alternate`) | {status_order} | current={md_value(benchmark_config.get('engine_order'))} |"
+    )
+    status_sink = "pass" if not sink_warnings else "warn"
+    lines.append(
+        f"| Workload parity (`sink`) | {status_sink} | warnings={len(sink_warnings)} |"
+    )
+    status_bootstrap = "pass" if bootstrap_samples >= 1000 else "warn"
+    lines.append(
+        f"| CI robustness (`bootstrap_samples >= 1000`) | {status_bootstrap} | current={bootstrap_samples} |"
+    )
+    status_dirty = (
+        "pass" if not bool(environment.get("git_dirty")) else "warn"
+    )
+    lines.append(
+        f"| Clean git tree | {status_dirty} | dirty={md_value(environment.get('git_dirty'))} |"
+    )
 
     lines.append("")
     lines.append("Startup (`init_ms`, lower is better):")
     lines.append("")
-    lines.append("| Init path | `kiwi-rs` | `kiwipiepy` |")
-    lines.append("|---|---:|---:|")
+    lines.append("| Init path | `kiwi-rs` | `kiwipiepy` | `kiwi-rs` CV | `kiwipiepy` CV |")
+    lines.append("|---|---:|---:|---:|---:|")
     lines.append(
-        f"| `Kiwi::init()` / `Kiwi()` | {fmt_med_range(rust['init_ms'], 3)} ms | {fmt_med_range(py['init_ms'], 3)} ms |"
+        f"| `Kiwi::init()` / `Kiwi()` | {fmt_med_range(rust['init_ms'], 3)} ms | {fmt_med_range(py['init_ms'], 3)} ms | {fmt_cv(rust['init_ms'])} | {fmt_cv(py['init_ms'])} |"
     )
 
     if rust_only:
         lines.append("")
         lines.append("Rust-only benchmark features:")
         lines.append("")
-        lines.append("| Feature | `kiwi-rs` |")
-        lines.append("|---|---:|")
+        lines.append("| Feature | `kiwi-rs` | `kiwi-rs` CV |")
+        lines.append("|---|---:|---:|")
         for feature in rust_only:
             lines.append(
-                f"| `{feature}` | {fmt_med_range(rust_features[feature]['calls_per_sec'])} |"
+                f"| `{feature}` | {fmt_med_range(rust_features[feature]['calls_per_sec'])} | {fmt_cv(rust_features[feature]['calls_per_sec'])} |"
             )
 
     if py_only:
         lines.append("")
         lines.append("Python-only benchmark features:")
         lines.append("")
-        lines.append("| Feature | `kiwipiepy` |")
-        lines.append("|---|---:|")
+        lines.append("| Feature | `kiwipiepy` | `kiwipiepy` CV |")
+        lines.append("|---|---:|---:|")
         for feature in py_only:
             lines.append(
-                f"| `{feature}` | {fmt_med_range(py_features[feature]['calls_per_sec'])} |"
+                f"| `{feature}` | {fmt_med_range(py_features[feature]['calls_per_sec'])} | {fmt_cv(py_features[feature]['calls_per_sec'])} |"
             )
 
-    return "\n".join(lines)
+    return "\n".join(lines), sink_warnings
+
+
+def command_to_text(cmd: list[str]) -> str:
+    return " ".join(cmd)
+
+
+def run_order_for_repeat(engine_order: str, repeat_index: int) -> list[str]:
+    if engine_order == "rust-first":
+        return [RUST_ENGINE, PY_ENGINE]
+    if engine_order == "python-first":
+        return [PY_ENGINE, RUST_ENGINE]
+    if repeat_index % 2 == 0:
+        return [RUST_ENGINE, PY_ENGINE]
+    return [PY_ENGINE, RUST_ENGINE]
 
 
 def main() -> int:
     args = parse_args()
     cwd = Path(__file__).resolve().parents[1]
     environment = collect_environment(cwd, args.python_bin)
-    benchmark_config = {
-        "text": args.text,
-        "warmup": args.warmup,
-        "iters": args.iters,
-        "batch_size": args.batch_size,
-        "batch_iters": args.batch_iters,
-        "input_mode": args.input_mode,
-        "variant_pool": args.variant_pool,
-        "repeats": args.repeats,
-        "join_lm_search": args.join_lm_search,
-    }
+    dataset_rows_selected: list[tuple[str, str]] = []
+    dataset_audit_info: dict[str, object] = {}
+    dataset_hash = ""
+    if args.dataset_tsv:
+        dataset_rows_all = load_dataset_rows(args.dataset_tsv)
+        dataset_rows_selected = filter_dataset_rows(dataset_rows_all, args.dataset_category)
+        dataset_audit_info = dataset_audit(dataset_rows_selected)
+        dataset_hash = dataset_sha256(args.dataset_tsv)
 
     rust_cmd = [
         "cargo",
@@ -481,6 +866,10 @@ def main() -> int:
         "--join-lm-search",
         args.join_lm_search,
     ]
+    if args.dataset_tsv:
+        rust_cmd.extend(["--dataset-tsv", args.dataset_tsv])
+        if args.dataset_category:
+            rust_cmd.extend(["--dataset-category", args.dataset_category])
     py_cmd = [
         args.python_bin,
         "scripts/bench_features_kiwipiepy.py",
@@ -501,18 +890,96 @@ def main() -> int:
         "--join-lm-search",
         args.join_lm_search,
     ]
+    if args.dataset_tsv:
+        py_cmd.extend(["--dataset-tsv", args.dataset_tsv])
+        if args.dataset_category:
+            py_cmd.extend(["--dataset-category", args.dataset_category])
+
+    commands = {
+        RUST_ENGINE: rust_cmd,
+        PY_ENGINE: py_cmd,
+    }
+    run_schedule: list[dict[str, object]] = []
+    benchmark_config = {
+        "text": args.text,
+        "warmup": args.warmup,
+        "iters": args.iters,
+        "batch_size": args.batch_size,
+        "batch_iters": args.batch_iters,
+        "input_mode": args.input_mode,
+        "variant_pool": args.variant_pool,
+        "repeats": args.repeats,
+        "join_lm_search": args.join_lm_search,
+        "engine_order": args.engine_order,
+        "sleep_between_engines_ms": args.sleep_between_engines_ms,
+        "sleep_between_runs_ms": args.sleep_between_runs_ms,
+        "sink_warning_threshold_pct": args.sink_warning_threshold * 100.0,
+        "bootstrap_samples": args.bootstrap_samples,
+        "equivalence_band_pct": args.equivalence_band * 100.0,
+        "rust_cmd": command_to_text(rust_cmd),
+        "python_cmd": command_to_text(py_cmd),
+    }
+    if args.dataset_tsv:
+        benchmark_config.update(
+            {
+                "dataset_tsv": args.dataset_tsv,
+                "dataset_category": args.dataset_category or "all",
+                "dataset_sha256": dataset_hash,
+                "dataset_rows": dataset_audit_info.get("rows", 0),
+                "dataset_unique_texts": dataset_audit_info.get("unique_texts", 0),
+                "dataset_categories": dataset_audit_info.get("categories", 0),
+                "dataset_category_counts": dataset_audit_info.get("category_counts", ""),
+                "dataset_char_len_min": dataset_audit_info.get("char_len_min", 0),
+                "dataset_char_len_median": dataset_audit_info.get("char_len_median", 0),
+                "dataset_char_len_max": dataset_audit_info.get("char_len_max", 0),
+            }
+        )
 
     runs: list[RunSample] = []
+    run_records: list[dict[str, object]] = []
     for index in range(args.repeats):
-        print(f"[run {index + 1}/{args.repeats}] kiwi-rs")
-        rust_output = run_command(rust_cmd, cwd)
-        runs.append(parse_run_output(rust_output))
-        print(f"[run {index + 1}/{args.repeats}] kiwipiepy")
-        py_output = run_command(py_cmd, cwd)
-        runs.append(parse_run_output(py_output))
+        order = run_order_for_repeat(args.engine_order, index)
+        run_schedule.append({"repeat": index + 1, "order": order})
+        for engine_offset, engine_name in enumerate(order):
+            print(f"[run {index + 1}/{args.repeats}] {engine_name}")
+            output = run_command(commands[engine_name], cwd)
+            sample = parse_run_output(output)
+            if sample.engine != engine_name:
+                raise RuntimeError(
+                    f"engine output mismatch: expected={engine_name}, parsed={sample.engine}"
+                )
+            runs.append(sample)
+            run_records.append(
+                {
+                    "repeat": index + 1,
+                    "engine": sample.engine,
+                    "init_ms": sample.init_ms,
+                    "features": {
+                        feature: {
+                            "avg_ms": values.avg_ms,
+                            "calls_per_sec": values.calls_per_sec,
+                            "sink": values.sink,
+                            "iters": values.iters,
+                        }
+                        for feature, values in sample.features.items()
+                    },
+                }
+            )
+            if engine_offset + 1 < len(order) and args.sleep_between_engines_ms > 0:
+                time.sleep(args.sleep_between_engines_ms / 1000.0)
+        if index + 1 < args.repeats and args.sleep_between_runs_ms > 0:
+            time.sleep(args.sleep_between_runs_ms / 1000.0)
 
     agg = aggregate(runs)
-    markdown = build_markdown(agg, args.repeats, environment, benchmark_config)
+    markdown, sink_warnings = build_markdown(
+        agg,
+        args.repeats,
+        environment,
+        benchmark_config,
+        args.sink_warning_threshold,
+        args.bootstrap_samples,
+        args.equivalence_band,
+    )
     print()
     print(markdown)
 
@@ -529,7 +996,9 @@ def main() -> int:
             "metadata": {
                 "environment": environment,
                 "benchmark_config": benchmark_config,
+                "run_schedule": run_schedule,
             },
+            "raw_runs": run_records,
             "results": {
                 engine: {
                     "init_ms": values["init_ms"],
@@ -544,6 +1013,17 @@ def main() -> int:
             encoding="utf-8",
         )
         print(f"[written] {json_path}")
+
+    if args.strict_sink_check and sink_warnings:
+        warning_list = ", ".join(sink_warnings)
+        print(
+            (
+                "strict sink check failed: "
+                f"{warning_list} exceeded threshold {args.sink_warning_threshold * 100.0:.1f}%"
+            ),
+            file=sys.stderr,
+        )
+        return 2
 
     return 0
 

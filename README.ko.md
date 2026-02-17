@@ -221,9 +221,9 @@ python3 scripts/bench_kiwipiepy.py --text "아버지가방에들어가신다." -
 - 엄밀한 1:1 비교를 원하면 두 런타임이 같은 자산(`KIWI_LIBRARY_PATH`, `KIWI_MODEL_PATH`)을 쓰도록 맞추세요.
 - `kiwipiepy` 기본 `tokenize` 옵션과 맞추려면 Rust 벤치 명령에 `--python-default-options`를 붙이세요.
 
-### 확장 기능 벤치마크 스냅샷 (로컬 측정, 2026-02-17)
+### 외부 공개용 벤치 실행 세트 (권장)
 
-실행 명령:
+대외 문서/README에 성능 수치를 공개할 때는 아래 세트를 권장합니다.
 
 ```bash
 cd kiwi-rs
@@ -233,30 +233,143 @@ mkdir -p tmp
   --warmup 100 --iters 5000 \
   --batch-size 256 --batch-iters 500 \
   --input-mode repeated --variant-pool 4096 \
-  --repeats 1 \
-  --md-out tmp/feature_bench_repeated.md \
-  --json-out tmp/feature_bench_repeated.json
+  --repeats 7 \
+  --engine-order alternate \
+  --sleep-between-engines-ms 200 \
+  --sleep-between-runs-ms 500 \
+  --sink-warning-threshold 0.05 \
+  --bootstrap-samples 2000 \
+  --equivalence-band 0.05 \
+  --strict-sink-check \
+  --md-out tmp/feature_bench_repeated_r7.md \
+  --json-out tmp/feature_bench_repeated_r7.json
 
 .venv-bench/bin/python scripts/compare_feature_bench.py \
   --text "아버지가방에들어가신다." \
   --warmup 100 --iters 5000 \
   --batch-size 256 --batch-iters 500 \
   --input-mode varied --variant-pool 8192 \
-  --repeats 1 \
-  --md-out tmp/feature_bench_varied.md \
-  --json-out tmp/feature_bench_varied.json
+  --repeats 7 \
+  --engine-order alternate \
+  --sleep-between-engines-ms 200 \
+  --sleep-between-runs-ms 500 \
+  --sink-warning-threshold 0.05 \
+  --bootstrap-samples 2000 \
+  --equivalence-band 0.05 \
+  --strict-sink-check \
+  --md-out tmp/feature_bench_varied_r7.md \
+  --json-out tmp/feature_bench_varied_r7.json
 ```
 
-동일 명령을 주기 실행하는 CI는 `.github/workflows/feature-benchmark.yml`에 설정되어 있습니다.
-생성되는 markdown/json 스냅샷에는 벤치 환경/설정 메타데이터가 함께 포함됩니다.
+신뢰성 체크리스트:
 
-아래 요약은 1회 실행 기준이며, 대괄호는 최소-최대 범위(1회 실행 시 동일값)입니다.
+- `input_mode=repeated`(warm-cache)와 `input_mode=varied`(no-cache 근사)를 함께 공개합니다.
+- Rust는 반드시 release 모드로 측정하고, 메타데이터의 `rust_cmd`, `python_cmd`를 그대로 공개합니다.
+- 자산 경로(`KIWI_LIBRARY_PATH`, `KIWI_MODEL_PATH`)를 양쪽 런타임에서 동일하게 맞추고 메타데이터에 남깁니다.
+- 최소 `repeats>=5`(권장 `7`)로 측정하고 변동성(`CV`, `p95`, min-max)을 함께 공개합니다.
+- 통계 방어력을 위해 상대 처리량의 `95% bootstrap CI`와 `P(ratio>1)`를 함께 공개합니다.
+- 기능별 `sink` 비율(작업량 parity) 표를 확인하고, CI에서는 `--strict-sink-check` 사용을 권장합니다.
+- Git SHA와 dirty 여부를 같이 공개해 재현 가능성을 보장합니다.
+
+SWE 지표 해석 원칙(엄격 심사용):
+
+- 승패 주장은 점 추정치가 아니라 CI 기준으로 제시합니다: `ratio [low, high]`.
+- CI가 `1.05` 위에 완전히 위치할 때만(±5% practical equivalence 기준) Rust 우세를 강하게 주장합니다.
+- CI가 `[0.95, 1.05]`를 가로지르면 승패를 강제하지 않고 동등/불확실로 분류합니다.
+- startup(`init_ms`)은 steady-state 처리량 결론과 분리해 해석합니다.
+
+데이터셋 기반 벤치(외부 심사 권장):
+
+```bash
+cd kiwi-rs
+mkdir -p tmp
+.venv-bench/bin/python scripts/compare_feature_bench.py \
+  --dataset-tsv benchmarks/datasets/swe_textset_v2.tsv \
+  --input-mode varied \
+  --warmup 20 --iters 300 \
+  --batch-size 128 --batch-iters 60 \
+  --repeats 5 \
+  --engine-order alternate \
+  --sleep-between-engines-ms 100 \
+  --sleep-between-runs-ms 200 \
+  --sink-warning-threshold 0.05 \
+  --bootstrap-samples 2000 \
+  --equivalence-band 0.05 \
+  --strict-sink-check \
+  --md-out tmp/feature_bench_dataset_v2.md \
+  --json-out tmp/feature_bench_dataset_v2.json
+
+.venv-bench/bin/python scripts/compare_feature_dataset.py \
+  --dataset-tsv benchmarks/datasets/swe_textset_v2.tsv \
+  --input-mode varied \
+  --warmup 20 --iters 300 \
+  --batch-size 128 --batch-iters 60 \
+  --repeats 5 \
+  --out-dir tmp/feature_dataset_matrix_v2
+```
+
+데이터셋 참고 문서:
+
+- 스펙: `docs/benchmark_dataset_spec.ko.md`
+- 방어 가이드: `docs/benchmark_defense.ko.md`
+
+### 확장 기능 벤치마크 스냅샷 (dataset v2, 다회 실행, 2026-02-17)
+
+심사 방어 참고 문서:
+
+- `docs/benchmark_defense.ko.md`
+- `tmp/feature_dataset_matrix_v2_varied_r5_i300/matrix_summary.md`
+
+이번 스냅샷 실행 명령:
+
+```bash
+cd kiwi-rs
+mkdir -p tmp
+
+# warm-cache 전체 비교 (repeated 입력)
+.venv-bench/bin/python scripts/compare_feature_bench.py \
+  --dataset-tsv benchmarks/datasets/swe_textset_v2.tsv \
+  --input-mode repeated \
+  --warmup 20 --iters 300 \
+  --batch-size 128 --batch-iters 60 \
+  --repeats 5 \
+  --engine-order alternate \
+  --sleep-between-engines-ms 100 \
+  --sleep-between-runs-ms 200 \
+  --bootstrap-samples 2000 \
+  --equivalence-band 0.05 \
+  --strict-sink-check \
+  --md-out tmp/feature_dataset_matrix_v2_repeated_r5_i300/overall.md \
+  --json-out tmp/feature_dataset_matrix_v2_repeated_r5_i300/overall.json
+
+# no-cache 근사 데이터셋 계층 매트릭스
+.venv-bench/bin/python scripts/compare_feature_dataset.py \
+  --dataset-tsv benchmarks/datasets/swe_textset_v2.tsv \
+  --input-mode varied \
+  --warmup 20 --iters 300 \
+  --batch-size 128 --batch-iters 60 \
+  --repeats 5 \
+  --bootstrap-samples 2000 \
+  --equivalence-band 0.05 \
+  --engine-order alternate \
+  --sleep-between-engines-ms 100 \
+  --sleep-between-runs-ms 200 \
+  --out-dir tmp/feature_dataset_matrix_v2_varied_r5_i300
+```
+
+산출물:
+
+- repeated overall: `tmp/feature_dataset_matrix_v2_repeated_r5_i300/overall.md`
+- repeated overall json: `tmp/feature_dataset_matrix_v2_repeated_r5_i300/overall.json`
+- varied overall: `tmp/feature_dataset_matrix_v2_varied_r5_i300/overall.md`
+- varied overall json: `tmp/feature_dataset_matrix_v2_varied_r5_i300/overall.json`
+- varied category matrix: `tmp/feature_dataset_matrix_v2_varied_r5_i300/matrix_summary.md`
 
 벤치 환경:
 
 | 항목 | 값 |
 |---|---|
-| 측정 시각 (로컬) | 2026-02-17T17:10:06+09:00 |
+| 측정 시각 (로컬, varied overall) | 2026-02-17T20:27:29+09:00 |
 | OS | Darwin 24.6.0 |
 | 플랫폼 | macOS-15.7.4-arm64-arm-64bit-Mach-O |
 | CPU | arm64 (샌드박스 제약으로 모델명 미확인) |
@@ -267,76 +380,54 @@ mkdir -p tmp
 | Python (harness) | 3.14.3 (main, Feb 3 2026, 15:32:20) [Clang 17.0.0 (clang-1700.6.3.2)] |
 | Python (bench bin) | Python 3.14.3 (`.venv-bench/bin/python`) |
 | kiwipiepy | 0.22.2 |
-| Git | `753b8dc4d648d33b5ed6f163ba2ae3cb46397a7e` (`main`, dirty=True) |
+| Git | `cfd859461801659e6dcc099f57ff23001e8934b8` (`main`, dirty=True) |
 
-벤치 설정:
+데이터셋 프로필:
 
 | 항목 | 값 |
 |---|---|
-| text | 아버지가방에들어가신다. |
-| warmup | 100 |
-| iters | 5000 |
-| batch_size | 256 |
-| batch_iters | 500 |
-| input_mode | repeated |
-| variant_pool | 4096 |
-| repeats | 1 |
-| join_lm_search | true |
+| 경로 | `benchmarks/datasets/swe_textset_v2.tsv` |
+| sha256 | `8c81b8e8d0c4272f96c05e6851da10759f02361caa0a2acb881dd72e642f4696` |
+| 행 수 | 192 |
+| 고유 문장 수 | 192 |
+| 카테고리 수 | 8 |
+| 카테고리 분포 | code_mixed:24, colloquial:24, ecommerce:24, finance:24, longform:24, news:24, tech:24, typo_noisy:24 |
+| 텍스트 길이(문자) | min=14, median=63, max=192 |
 
-처리량 비교 (`calls_per_sec`, 클수록 빠름):
+벤치 설정:
 
-| 기능 | `kiwi-rs` | `kiwipiepy` | 상대값 (`kiwi-rs / kiwipiepy`) |
-|---|---:|---:|---:|
-| `tokenize` | 1185489.51 [1185489.51-1185489.51] | 7792.55 [7792.55-7792.55] | 152.13x |
-| `analyze_top1` | 1199112.66 [1199112.66-1199112.66] | 7612.25 [7612.25-7612.25] | 157.52x |
-| `split_into_sents` | 28908752.41 [28908752.41-28908752.41] | 3802.38 [3802.38-3802.38] | 7602.80x |
-| `split_into_sents_with_tokens` | 250558.01 [250558.01-250558.01] | 4872.41 [4872.41-4872.41] | 51.42x |
-| `space` | 357757.20 [357757.20-357757.20] | 4768.69 [4768.69-4768.69] | 75.02x |
-| `join` | 2402355.08 [2402355.08-2402355.08] | 675759.32 [675759.32-675759.32] | 3.56x |
-| `glue` | 6221490.02 [6221490.02-6221490.02] | 7613.64 [7613.64-7613.64] | 817.15x |
-| `analyze_many_loop` | 32.36 [32.36-32.36] | 27.94 [27.94-27.94] | 1.16x |
-| `analyze_many_native` | 166.11 [166.11-166.11] | 165.71 [165.71-165.71] | 1.00x |
-| `tokenize_many_loop` | 3409.24 [3409.24-3409.24] | 28.66 [28.66-28.66] | 118.95x |
-| `tokenize_many_batch` | 3134.67 [3134.67-3134.67] | 184.16 [184.16-184.16] | 17.02x |
-| `split_many_loop` | 27.87 [27.87-27.87] | 29.18 [29.18-29.18] | 0.96x |
-| `space_many_loop` | 29.39 [29.39-29.39] | 27.22 [27.22-27.22] | 1.08x |
-| `space_many_batch` | 161.79 [161.79-161.79] | 160.39 [160.39-160.39] | 1.01x |
-| `batch_analyze_native` | 166.11 [166.11-166.11] | 165.71 [165.71-165.71] | 1.00x |
+| 프로필 | input_mode | warmup | iters | batch_size | batch_iters | repeats | bootstrap_samples | equivalence_band | engine_order |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---|
+| repeated overall | repeated | 20 | 300 | 128 | 60 | 5 | 2000 | ±5% | alternate |
+| varied matrix | varied | 20 | 300 | 128 | 60 | 5 | 2000 | ±5% | alternate |
 
-초기화 (`init_ms`, 작을수록 빠름):
+카테고리 요약 (varied, 카테고리별):
 
-| 초기화 경로 | `kiwi-rs` | `kiwipiepy` |
-|---|---:|---:|
-| `Kiwi::init()` / `Kiwi()` | 1417.905 [1417.905-1417.905] ms | 680.748 [680.748-680.748] ms |
+| 카테고리 | 중앙값 비율 | Rust 승/전체 | 최약 기능 | 최강 기능 |
+|---|---:|---:|---|---|
+| `code_mixed` | 40.23x | 15/15 | `join` (4.29x) | `split_many_loop` (3961.64x) |
+| `colloquial` | 53.59x | 15/15 | `join` (3.98x) | `split_many_loop` (4633.05x) |
+| `ecommerce` | 53.79x | 15/15 | `join` (4.27x) | `split_many_loop` (6435.18x) |
+| `finance` | 49.18x | 15/15 | `join` (3.62x) | `split_many_loop` (7399.29x) |
+| `longform` | 56.26x | 15/15 | `join` (4.70x) | `split_many_loop` (18218.50x) |
+| `news` | 53.04x | 15/15 | `join` (3.66x) | `split_many_loop` (7721.17x) |
+| `tech` | 43.72x | 15/15 | `join` (3.12x) | `split_many_loop` (6182.83x) |
+| `typo_noisy` | 70.02x | 15/15 | `join` (3.97x) | `split_many_loop` (4048.25x) |
 
-Rust 전용 벤치 항목:
-
-| 기능 | `kiwi-rs` |
-|---|---:|
-| `join_prepared` | 277556.12 [277556.12-277556.12] |
-| `join_prepared_utf16` | 278618.79 [278618.79-278618.79] |
-| `joiner_reuse` | 3518440.85 [3518440.85-3518440.85] |
-| `joiner_reuse_utf16` | 2743359.29 [2743359.29-2743359.29] |
-
-Python 전용 벤치 항목:
-
-| 기능 | `kiwipiepy` |
-|---|---:|
-| `split_many_batch` | 181.50 [181.50-181.50] |
-
-다양 입력(no-cache 근사) 시나리오 상대값 스냅샷 (`input_mode=varied`, `variant_pool=8192`):
+Repeated vs Varied 상대값 스냅샷 (`kiwi-rs / kiwipiepy`):
 
 | 기능 | Repeated 상대값 | Repeated 증감률 | Varied 상대값 | Varied 증감률 |
 |---|---:|---:|---:|---:|
-| `tokenize` | 152.13x | +15113.0% | 0.94x | -6.0% |
-| `analyze_top1` | 157.52x | +15652.0% | 1.01x | +1.0% |
-| `split_into_sents` | 7602.80x | +760180.0% | 1.16x | +16.0% |
-| `split_into_sents_with_tokens` | 51.42x | +5042.0% | 1.02x | +2.0% |
-| `glue` | 817.15x | +81615.0% | 1.15x | +15.0% |
-| `analyze_many_native` | 1.00x | +0.0% | 0.82x | -18.0% |
-| `tokenize_many_batch` | 17.02x | +1602.0% | 0.79x | -21.0% |
-| `space_many_batch` | 1.01x | +1.0% | 0.95x | -5.0% |
-| `join` | 3.56x | +256.0% | 4.37x | +337.0% |
+| `tokenize` | 156.03x | +15503.4% | 1.49x | +48.9% |
+| `analyze_top1` | 148.44x | +14744.4% | 1.00x | +0.3% |
+| `split_into_sents` | 9445.91x | +944491.2% | 1.06x | +6.4% |
+| `split_into_sents_with_tokens` | 86.64x | +8564.1% | 67.75x | +6675.4% |
+| `space` | 99.02x | +9802.0% | 1.12x | +11.8% |
+| `glue` | 542.54x | +54153.8% | 1.56x | +56.2% |
+| `join` | 4.30x | +329.9% | 3.85x | +285.1% |
+| `analyze_many_native` | 24.10x | +2309.9% | 0.92x | -7.9% |
+| `tokenize_many_batch` | 24.62x | +2362.2% | 23.18x | +2217.9% |
+| `space_many_batch` | 14.23x | +1322.6% | 0.98x | -1.7% |
 
 `증감률(%)` 계산식: `(kiwi-rs / kiwipiepy - 1) * 100`  
 `+`는 `kiwi-rs`가 더 빠름, `-`는 더 느림을 의미합니다.
@@ -348,98 +439,66 @@ xychart-beta
     title "Repeated 입력 상대값 (주요 항목)"
     x-axis ["tokenize","analyze_top1","split_with_tokens","join","analyze_many_native","tokenize_many_batch","space_many_batch"]
     y-axis "kiwi-rs / kiwipiepy (x)" 0 --> 170
-    bar [152.13,157.52,51.42,3.56,1.00,17.02,1.01]
+    bar [156.03,148.44,86.64,4.30,24.10,24.62,14.23]
 ```
 
 ```mermaid
 xychart-beta
     title "Repeated 입력 상대값 (Split + Glue)"
     x-axis ["split_into_sents","glue"]
-    y-axis "kiwi-rs / kiwipiepy (x)" 0 --> 8000
-    bar [7602.80,817.15]
+    y-axis "kiwi-rs / kiwipiepy (x)" 0 --> 10000
+    bar [9445.91,542.54]
 ```
 
 ```mermaid
 xychart-beta
-    title "Varied 입력 상대값 (no-cache 근사)"
-    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","join","analyze_many_native","tokenize_many_batch","space_many_batch"]
+    title "Varied 입력 상대값 (중간 범위)"
+    x-axis ["tokenize","analyze_top1","split","space","glue","join","analyze_many_native","space_many_batch"]
     y-axis "kiwi-rs / kiwipiepy (x)" 0 --> 5
-    bar [0.94,1.01,1.16,1.02,1.10,1.15,4.37,0.82,0.79,0.95]
-```
-
-절대값 차트(다양 입력, no-cache 근사):
-
-- 처리량(Throughput) = 1초당 처리 호출 수 (`calls/sec`, 클수록 좋음)
-- 지연시간(Latency) = 호출 1건 평균 시간 (`avg_ms`, 작을수록 좋음)
-- 일부 렌더러에서 `mermaid xychart-beta`의 다중 bar 시리즈가 겹쳐 보일 수 있습니다.
-- 가독성을 위해 아래 차트는 엔진별로 분리했습니다.
-
-```mermaid
-xychart-beta
-    title "Varied 처리량 (핵심 기능, kiwi-rs)"
-    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
-    y-axis "calls/sec (클수록 좋음)" 0 --> 8000
-    bar [6956.95,7319.22,5104.73,4372.13,4944.59,5692.86,158.62,151.12,150.76]
+    bar [1.49,1.00,1.06,1.12,1.56,3.85,0.92,0.98]
 ```
 
 ```mermaid
 xychart-beta
-    title "Varied 처리량 (핵심 기능, kiwipiepy)"
-    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
-    y-axis "calls/sec (클수록 좋음)" 0 --> 8000
-    bar [7393.81,7212.44,4399.49,4282.95,4497.21,4965.80,192.74,190.38,159.43]
+    title "Varied 입력 상대값 (고범위 기능)"
+    x-axis ["split_with_tokens","tokenize_many_batch"]
+    y-axis "kiwi-rs / kiwipiepy (x)" 0 --> 70
+    bar [67.75,23.18]
 ```
 
-```mermaid
-xychart-beta
-    title "Varied 처리량 (Join)"
-    x-axis ["join (kiwi-rs)","join (kiwipiepy)"]
-    y-axis "calls/sec (클수록 좋음)" 0 --> 3000000
-    bar [2927258.22,669983.08]
-```
-
-```mermaid
-xychart-beta
-    title "Varied 지연시간 (핵심 기능, kiwi-rs)"
-    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
-    y-axis "avg ms/call (작을수록 좋음)" 0 --> 7
-    bar [0.143741,0.136627,0.195897,0.228721,0.202241,0.175659,6.304233,6.617300,6.632977]
-```
-
-```mermaid
-xychart-beta
-    title "Varied 지연시간 (핵심 기능, kiwipiepy)"
-    x-axis ["tokenize","analyze_top1","split","split_with_tokens","space","glue","analyze_many_native","tokenize_many_batch","space_many_batch"]
-    y-axis "avg ms/call (작을수록 좋음)" 0 --> 7
-    bar [0.135248,0.138649,0.227299,0.233484,0.222360,0.201377,5.188234,5.252784,6.272204]
-```
+처리량(Throughput) = 1초당 처리 호출 수 (`calls/sec`, 클수록 좋음).
+지연시간(Latency) = 호출 1건 평균 시간 (`avg_ms`, 작을수록 좋음).
 
 좌우 숫자 비교 테이블(다양 입력, no-cache 근사):
 
 | 기능 | `kiwi-rs` calls/sec | `kiwipiepy` calls/sec | 상대값 (`x`) | 증감률 | `kiwi-rs` avg_ms | `kiwipiepy` avg_ms |
 |---|---:|---:|---:|---:|---:|---:|
-| `tokenize` | 6956.95 | 7393.81 | 0.94x | -6.0% | 0.143741 | 0.135248 |
-| `analyze_top1` | 7319.22 | 7212.44 | 1.01x | +1.0% | 0.136627 | 0.138649 |
-| `split_into_sents` | 5104.73 | 4399.49 | 1.16x | +16.0% | 0.195897 | 0.227299 |
-| `split_into_sents_with_tokens` | 4372.13 | 4282.95 | 1.02x | +2.0% | 0.228721 | 0.233484 |
-| `space` | 4944.59 | 4497.21 | 1.10x | +10.0% | 0.202241 | 0.222360 |
-| `glue` | 5692.86 | 4965.80 | 1.15x | +15.0% | 0.175659 | 0.201377 |
-| `join` | 2927258.22 | 669983.08 | 4.37x | +337.0% | 0.000342 | 0.001493 |
-| `analyze_many_native` | 158.62 | 192.74 | 0.82x | -18.0% | 6.304233 | 5.188234 |
-| `tokenize_many_batch` | 151.12 | 190.38 | 0.79x | -21.0% | 6.617300 | 5.252784 |
-| `space_many_batch` | 150.76 | 159.43 | 0.95x | -5.0% | 6.632977 | 6.272204 |
+| `tokenize` | 3052.78 | 2049.71 | 1.49x | +48.9% | 0.327571 | 0.487874 |
+| `analyze_top1` | 2098.51 | 2092.15 | 1.00x | +0.3% | 0.476528 | 0.477976 |
+| `split_into_sents` | 2116.51 | 1990.01 | 1.06x | +6.4% | 0.472477 | 0.502509 |
+| `split_into_sents_with_tokens` | 137646.25 | 2031.56 | 67.75x | +6675.4% | 0.007265 | 0.492232 |
+| `space` | 2420.12 | 2164.93 | 1.12x | +11.8% | 0.413203 | 0.461909 |
+| `glue` | 2860.79 | 1831.72 | 1.56x | +56.2% | 0.349553 | 0.545935 |
+| `join` | 1413427.56 | 367047.46 | 3.85x | +285.1% | 0.000708 | 0.002724 |
+| `analyze_many_native` | 86.50 | 93.90 | 0.92x | -7.9% | 11.561290 | 10.650051 |
+| `tokenize_many_batch` | 2259.52 | 97.48 | 23.18x | +2217.9% | 0.442572 | 10.258036 |
+| `space_many_batch` | 92.02 | 93.64 | 0.98x | -1.7% | 10.867520 | 10.678922 |
 
-`증감률(%)` 계산식: `(kiwi-rs / kiwipiepy - 1) * 100`.
+초기화 (`init_ms`, 작을수록 빠름):
+
+| 프로필 | `kiwi-rs` | `kiwipiepy` |
+|---|---:|---:|
+| repeated overall | 1316.395 ms | 631.000 ms |
+| varied overall | 1326.721 ms | 622.918 ms |
 
 해석:
 
-- 반복적으로 동일한 형태소 시퀀스를 결합하는 경우, 기본 `join` 경로의 내부 LRU 캐시 효과로 `kiwi-rs`가 `join`에서도 우세하게 측정되었습니다.
-- `split_into_sents`와 `glue`는 캐시 miss 경로/조각쌍 재사용 최적화 이후 `varied` 시나리오에서도 1.0x를 넘겼습니다.
-- 고정된 시퀀스를 명시적으로 재사용할 때는 `prepare_joiner`(`joiner_reuse*`)가 여전히 가장 빠릅니다.
-- 반복 입력에서는 내부 결과 캐시가 재사용되어 `tokenize*`, `analyze*`, 토큰 포함 문장 분리 경로 처리량이 크게 상승합니다.
-- 공정성을 위해 `input_mode=repeated`(warm-cache)와 `input_mode=varied`(no-cache 근사) 결과를 함께 공개하는 것을 권장합니다.
-- 이 벤치 구성에서는 `split_many_batch`가 Python 전용입니다.
-- `Kiwi::init()`에는 자산 탐색/부트스트랩 체크가 포함되므로, 초기화와 steady-state 처리량은 분리해서 보시는 것이 정확합니다.
+- 반복 동일 입력은 warm-cache 상한선이며 대부분 기능에서 큰 폭의 속도 우위를 보입니다.
+- 외부 공개 기준은 `varied` 데이터셋 프로필(no-cache 근사)입니다.
+- `varied`에서 `analyze_many_native`, `space_many_batch`는 거의 동급이거나 Python이 근소 우세할 수 있습니다.
+- `join`은 두 프로필 모두에서 일관되게 Rust가 빠르게 측정됩니다.
+- 카테고리 분해 결과(`varied`)에서 공통 기능 기준으로 모든 카테고리에서 Rust가 승리(`15/15`)했습니다.
+- 초기화(`init_ms`)는 steady-state 처리량과 분리해 해석해야 합니다.
 
 ## kiwipiepy 호환성
 
