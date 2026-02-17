@@ -1,12 +1,12 @@
 # kiwi-rs의 kiwipiepy 호환성 현황
 
-기준 시점: 2026-02-16
+기준 시점: 2026-02-17
 
-비교 기준:
+검증 기준:
 
-- `ref/kiwipiepy-main/kiwipiepy/_wrap.py`
-- `ref/kiwipiepy-main/src/KiwiPy.cpp`
-- `ref/Kiwi-main/include/kiwi/capi.h`
+- `kiwipiepy==0.22.2` 런타임 API 점검 (`dir(kiwipiepy.Kiwi)` 및 패키지 심볼 확인).
+- `kiwi-rs` 소스 (`src/runtime.rs`, `src/types.rs`, `src/native.rs`) 기준 `v0.1.4`.
+- `src/native.rs`의 C API 로더 테이블 (`KiwiApi` 필드 `101`, `load_symbol*` 호출 `101`).
 
 ## 상태 정의
 
@@ -16,7 +16,7 @@
 
 ## 계층별 진행 수준
 
-1. C API 커버리지: `완료` (`capi.h` 심볼 `101/101` 로딩)
+1. C API 커버리지: `완료` (`src/native.rs` 로더 엔트리 `101/101`)
 2. 고수준 Rust API 커버리지: 핵심 NLP 흐름은 `높은 수준`
 3. `kiwipiepy` 전체 표면 호환: `부분 지원`
 
@@ -27,8 +27,8 @@
 | `Kiwi.add_user_word` | Partial | `KiwiBuilder::add_user_word` (builder 단계) |
 | `Kiwi.add_pre_analyzed_word` | Partial | `KiwiBuilder::add_pre_analyzed_word` (builder 단계) |
 | `Kiwi.load_user_dictionary` | Partial | `KiwiBuilder::load_user_dictionary` (builder 단계) |
-| `Kiwi.add_rule` | Equivalent | `KiwiBuilder::add_rule` |
-| `Kiwi.add_re_rule` | Partial | `KiwiBuilder::add_re_rule`; Python `re.sub`와 완전 동일하진 않음 |
+| `Kiwi.add_rule` | Partial | `KiwiBuilder::add_rule` (builder 단계) |
+| `Kiwi.add_re_rule` | Partial | `KiwiBuilder::add_re_rule` (builder 단계); Python `re.sub`와 완전 동일하진 않음 |
 | `Kiwi.add_re_word` | Partial | `Kiwi::add_re_word(pattern, tag)`; callback/user_value 변형 미노출 |
 | `Kiwi.clear_re_words` | Equivalent | `Kiwi::clear_re_words` |
 | `Kiwi.analyze` | Partial | `Kiwi::analyze*`, `Kiwi::analyze_many_with_options`, `Kiwi::analyze_many_via_native` |
@@ -73,8 +73,8 @@
 
 | kiwipiepy API | 상태 | kiwi-rs API / 비고 |
 |---|---|---|
-| `Kiwi.extract_words` | Equivalent | `KiwiBuilder::extract_words` |
-| `Kiwi.extract_add_words` | Equivalent | `KiwiBuilder::extract_add_words` |
+| `Kiwi.extract_words` | Partial | `KiwiBuilder::extract_words` (builder 단계) |
+| `Kiwi.extract_add_words` | Partial | `KiwiBuilder::extract_add_words` (builder 단계) |
 | `Kiwi.convert_hsdata` | Unavailable | C++ API 유틸, C API 엔트리 없음 |
 | `Kiwi.make_hsdataset` | Unavailable | C++ API 유틸, C API 엔트리 없음 |
 | `Kiwi.evaluate`, `Kiwi.predict_next` | Unavailable | kiwipiepy에서도 런타임 미구현(`NotImplementedError`) |
@@ -86,10 +86,11 @@
 | `TypoTransformer`, `TypoDefinition` preset | Partial | `KiwiTypo`는 있으나 Python 클래스 구조/preset과 다름 |
 | `HSDataset` | Unavailable | Python/C++ 계층 |
 | `NgramExtractor` | Unavailable | 대응 C API 없음 |
-| `KNLangModel` | Unavailable | 대응 C API 없음 |
 | `Template` / `Kiwi.template` | Unavailable | Python 템플릿 계층 |
 | `utils.Stopwords` | Unavailable | Rust 헬퍼 타입 미제공 |
 | `extract_substrings` | Unavailable | C++ 계층 유틸 |
+
+`KNLangModel`은 `kiwipiepy 0.22.2` 패키지 레벨에서 노출되지 않아 현재 표에서는 제외했습니다.
 
 ## 미지원 항목이 남는 이유
 
