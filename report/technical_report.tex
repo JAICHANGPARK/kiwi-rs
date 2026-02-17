@@ -73,8 +73,36 @@ Existing Rust interop stacks (e.g., generated C bindings, C++ bridge layers, Pyt
 
 This document is intentionally an \textbf{engineering technical report}: it prioritizes implementation transparency, reproducibility artifacts, and operational trade-offs over algorithmic novelty claims.
 
+\section{Related Work}
+To position \texttt{kiwi-rs} in the broader Korean NLP landscape, we organize representative prior work into eight tracks (20 papers total):
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Korean evaluation benchmarks.} KLUE defines a multi-task Korean language understanding benchmark suite, while KorQuAD provides a Korean machine-reading comprehension benchmark~\cite{klue2021,korquad2019}.
+    \item \textbf{Korean pre-trained language models.} KR-BERT and KoreALBERT report Korean-specific pretraining strategies and efficiency trade-offs for encoder models~\cite{krbert2020,korealbert2021}.
+    \item \textbf{Transformer pretraining baselines.} BERT, RoBERTa, ALBERT, ELECTRA, and T5 form widely used encoder/text-to-text pretraining baselines that Korean adaptations commonly compare against~\cite{bert2018,roberta2019,albert2019,electra2020,t52020}.
+    \item \textbf{Multilingual transfer models.} XLM-R and mT5 provide strong multilingual baselines that include Korean and are frequently used as cross-lingual reference points~\cite{xlmr2019,mt52020}.
+    \item \textbf{Tokenization infrastructure.} SentencePiece and BPE-style subword segmentation remain central tokenization choices in practical Korean NLP pipelines~\cite{sentencepiece2018,bpe2016}.
+    \item \textbf{Transformer architecture foundation.} The original Transformer formulation remains the architectural basis for most of the model families above~\cite{transformer2017}.
+    \item \textbf{Sequence labeling foundations.} CRF-based structured prediction and early unified neural tagging frameworks provide important methodological context for POS/morphological sequence decisions~\cite{lafferty2001crf,collobert2011,peters2018elmo}.
+    \item \textbf{Subword and OOV robustness.} Neural LM and subword representation lines (including WordPiece-style segmentation in Japanese/Korean voice search and subword-enriched embeddings) motivate robust handling of sparse or unseen forms~\cite{bengio2003nlm,schuster2012jkvoice,bojanowski2017subword}.
+\end{itemize}
+
+These studies primarily evaluate model quality and benchmark accuracy. \texttt{kiwi-rs} is complementary: it contributes a systems-level engineering layer for safe, reproducible, and high-throughput Rust deployment over the existing Kiwi analyzer.
+
 \section{Background: Kiwi}
-Kiwi is a Korean morphological analyzer implemented in C++ and distributed with a public C API, which makes it usable across multiple language runtimes~\cite{kiwi_repo}. In practice, Kiwi is commonly consumed through \texttt{kiwipiepy} in Python workflows, while additional ecosystem bindings target other environments~\cite{kiwipiepy,kiwi_repo}.
+Kiwi is a Korean morphological analyzer implemented in C++ and distributed with a public C API, which makes it usable across multiple language runtimes~\cite{kiwi_repo}. \textbf{In modeling terms, Kiwi is not presented upstream as a Transformer architecture; it is described as statistical LM + skip-bigram based disambiguation}~\cite{kiwi_repo,kiwi_kjdh_2024}. In practice, Kiwi is commonly consumed through \texttt{kiwipiepy} in Python workflows, while additional ecosystem bindings target other environments~\cite{kiwipiepy,kiwi_repo}.
+
+\subsection{Modeling Basis Clarification (Not Transformer Architecture)}
+Because the Kiwi codebase contains identifiers such as \texttt{TypoTransformer} and \texttt{history\_transformer}, it is easy to misread the engine as Transformer-architecture NLP. Upstream documentation and the project citation, however, describe Kiwi's ambiguity resolution as a combination of a statistical language model and skip-bigram modeling~\cite{kiwi_repo,kiwi_kjdh_2024}. In this report, we therefore treat Kiwi as a statistical morphology analyzer with LM-based disambiguation, while Transformer-family papers are used only as adjacent related-work context.
+
+\paragraph{Reviewer-oriented disambiguation (\texttt{TypoTransformer} question).}
+For the specific review concern ``\texttt{TypoTransformer} exists, so is Kiwi Transformer-based?'', our source audit indicates \textbf{no}:
+\begin{itemize}[leftmargin=1.5em]
+    \item \texttt{TypoTransformer} is an error/typo generation-correction utility class (rule/cost based), not a neural encoder block.
+    \item \texttt{history\_transformer} in KNLM code is a history-index remapping argument for n-gram construction, not self-attention computation.
+    \item Core LM implementation units are explicitly named \texttt{Knlm}, \texttt{CoNgramModel}, and \texttt{SkipBigramModel}, consistent with statistical LM design.
+    \item Build configuration in the upstream project does not introduce deep-learning runtime dependencies (e.g., PyTorch/TensorFlow/ONNX).
+\end{itemize}
+Accordingly, we avoid claiming that Kiwi itself is a Transformer neural architecture and keep the terminology separation explicit throughout this report.
 
 \subsection{Ecosystem and Distribution Survey}
 Upstream Kiwi documentation describes a broad multi-language ecosystem centered on the C API and release-packaged binaries~\cite{kiwi_repo,kiwi_releases,kiwi_gui}. Table~\ref{tab:kiwi_ecosystem} summarizes the currently documented channels and wrappers relevant to market and adoption analysis.
@@ -873,7 +901,7 @@ The repository already includes scripts and generated artifacts for this checkli
 \section*{Artifact and License Notes}
 \texttt{kiwi-rs} is released under LGPL-2.1-or-later. This manuscript reports software benchmark data; it does not contain user-identifying or sensitive human-subject data.
 
-\bibliographystyle{plain}
+\bibliographystyle{unsrt}
 \bibliography{references}
 
 \appendix

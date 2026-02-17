@@ -452,18 +452,18 @@ Benchmark environment:
 
 | Item | Value |
 |---|---|
-| Timestamp (local, varied overall) | 2026-02-17T20:27:29+09:00 |
-| OS | Darwin 24.6.0 |
-| Platform | macOS-15.7.4-arm64-arm-64bit-Mach-O |
-| CPU | arm64 (CPU brand unavailable in sandbox) |
-| Cores (physical/logical) | -/10 |
-| Memory | 16.00 GiB (17179869184 bytes) |
+| Timestamp (local, varied overall) | `<LOCAL_TIMESTAMP_REDACTED>` |
+| OS | `<HOST_OS_REDACTED>` |
+| Platform | `<HOST_PLATFORM_REDACTED>` |
+| CPU | `<HOST_CPU_REDACTED>` |
+| Cores (physical/logical) | `<HOST_CORES_REDACTED>` |
+| Memory | `<HOST_MEMORY_REDACTED>` |
 | rustc | rustc 1.93.1 (01f6ddf75 2026-02-11) |
 | cargo | cargo 1.93.1 (083ac5135 2025-12-15) |
-| Python (harness) | 3.14.3 (main, Feb 3 2026, 15:32:20) [Clang 17.0.0 (clang-1700.6.3.2)] |
+| Python (harness) | 3.14.3 (`<BUILD_DETAILS_REDACTED>`) |
 | Python (bench bin) | Python 3.14.3 (`.venv-bench/bin/python`) |
 | kiwipiepy | 0.22.2 |
-| Git | `cfd859461801659e6dcc099f57ff23001e8934b8` (`main`, dirty=True) |
+| Git | `<REPO_COMMIT_SHA>` (`<BRANCH>`, dirty=`<true\|false>`) |
 
 Dataset profile:
 

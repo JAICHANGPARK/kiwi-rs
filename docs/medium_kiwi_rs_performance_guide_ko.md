@@ -338,23 +338,23 @@ mkdir -p tmp
 
 ---
 
-## 7. 벤치마크 결과 (로컬 실측, 2026-02-17)
+## 7. 벤치마크 결과 (로컬 측정 스냅샷)
 
 출처 파일:
 
-- `tmp/feature_bench_repeated.md` (측정 시각: 2026-02-17T17:10:06+09:00)
-- `tmp/feature_bench_varied.md` (측정 시각: 2026-02-17T17:13:08+09:00)
+- `tmp/feature_bench_repeated.md` (측정 시각: `<LOCAL_TIMESTAMP_REDACTED>`)
+- `tmp/feature_bench_varied.md` (측정 시각: `<LOCAL_TIMESTAMP_REDACTED>`)
 
 공통 환경 요약:
 
-- OS: Darwin 24.6.0 (macOS-15.7.4-arm64)
+- OS: `<HOST_OS_REDACTED>`
 - rustc: 1.93.1 (2026-02-11)
 - cargo: 1.93.1
 - Python: 3.14.3
 - kiwipiepy: 0.22.2
 - text: `아버지가방에들어가신다.`
 - warmup: 100, iters: 5000, batch_size: 256, batch_iters: 500
-- Git HEAD: `753b8dc4d648d33b5ed6f163ba2ae3cb46397a7e`
+- Git HEAD: `<REPO_COMMIT_SHA>`
 
 ### 7.1 Repeated 입력(캐시 유리) 결과
 

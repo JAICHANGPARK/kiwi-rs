@@ -338,23 +338,23 @@ mkdir -p tmp
 
 ---
 
-## 7. Benchmark Results (Local Measurement on February 17, 2026)
+## 7. Benchmark Results (Local Measurement Snapshot)
 
 Source snapshots:
 
-- `tmp/feature_bench_repeated.md` (timestamp: 2026-02-17T17:10:06+09:00)
-- `tmp/feature_bench_varied.md` (timestamp: 2026-02-17T17:13:08+09:00)
+- `tmp/feature_bench_repeated.md` (timestamp: `<LOCAL_TIMESTAMP_REDACTED>`)
+- `tmp/feature_bench_varied.md` (timestamp: `<LOCAL_TIMESTAMP_REDACTED>`)
 
 Common environment summary:
 
-- OS: Darwin 24.6.0 (macOS-15.7.4-arm64)
+- OS: `<HOST_OS_REDACTED>`
 - rustc: 1.93.1 (2026-02-11)
 - cargo: 1.93.1
 - Python: 3.14.3
 - kiwipiepy: 0.22.2
 - text: `아버지가방에들어가신다.`
 - warmup: 100, iters: 5000, batch_size: 256, batch_iters: 500
-- Git HEAD: `753b8dc4d648d33b5ed6f163ba2ae3cb46397a7e`
+- Git HEAD: `<REPO_COMMIT_SHA>`
 
 ### 7.1 Repeated input (cache-favorable)
 
