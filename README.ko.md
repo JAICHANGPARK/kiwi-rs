@@ -1,8 +1,23 @@
 # kiwi-rs
 
-[English README](README.md) | [kiwipiepy 호환성 문서(EN)](docs/kiwipiepy_parity.md) | [kiwipiepy 호환성 문서(KO)](docs/kiwipiepy_parity.ko.md)
+[Technical Report (PDF)](report/arxiv_draft.pdf) | [English README](README.md) | [kiwipiepy 호환성 문서(EN)](docs/kiwipiepy_parity.md) | [kiwipiepy 호환성 문서(KO)](docs/kiwipiepy_parity.ko.md)
 
 `kiwi-rs`는 Kiwi 공식 C API(`include/kiwi/capi.h`)를 Rust에서 사용할 수 있게 만든 바인딩입니다.
+
+## 목차
+
+- [AI 활용 사용자 가이드](#ai-활용-사용자-가이드)
+- [현재 지원 수준](#현재-지원-수준)
+- [설치](#설치)
+- [런타임 준비 방식](#런타임-준비-방식)
+- [라이브러리/모델 경로 직접 지정](#라이브러리모델-경로-직접-지정)
+- [API 개요](#api-개요)
+- [예제 실행](#예제-실행)
+- [Rust vs Python 벤치마크 (동일 조건)](#rust-vs-python-벤치마크-동일-조건)
+- [kiwipiepy 호환성](#kiwipiepy-호환성)
+- [자주 발생하는 오류](#자주-발생하는-오류)
+- [로컬 품질 검증](#로컬-품질-검증)
+- [라이선스](#라이선스)
 
 ## AI 활용 사용자 가이드
 

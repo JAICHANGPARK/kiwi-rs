@@ -1,8 +1,24 @@
 # kiwi-rs
 
-[한국어 README](README.ko.md) | [kiwipiepy parity (EN)](docs/kiwipiepy_parity.md) | [kiwipiepy parity (KO)](docs/kiwipiepy_parity.ko.md)
+[Technical Report (PDF)](report/arxiv_draft.pdf) | [한국어 README](README.ko.md) | [kiwipiepy parity (EN)](docs/kiwipiepy_parity.md) | [kiwipiepy parity (KO)](docs/kiwipiepy_parity.ko.md)
 
 Rust bindings for Kiwi via the official C API (`include/kiwi/capi.h`).
+
+## Table of contents
+
+- [AI user guide](#ai-user-guide)
+- [Current support status](#current-support-status)
+- [Installation](#installation)
+- [Runtime setup options](#runtime-setup-options)
+- [Manual path configuration](#manual-path-configuration)
+- [API overview](#api-overview)
+- [Supported APIs](#supported-apis)
+- [Examples](#examples)
+- [Rust vs Python benchmark (same conditions)](#rust-vs-python-benchmark-same-conditions)
+- [kiwipiepy parity](#kiwipiepy-parity)
+- [Common errors](#common-errors)
+- [Local quality checks](#local-quality-checks)
+- [License](#license)
 
 ## AI user guide
 

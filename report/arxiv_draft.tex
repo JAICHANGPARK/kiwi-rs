@@ -1,0 +1,256 @@
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage{enumitem}
+\usepackage{geometry}
+\geometry{margin=1in}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue
+}
+
+\sisetup{
+    detect-all=true,
+    group-separator={,},
+    group-minimum-digits=4
+}
+
+\title{kiwi-rs: Ergonomic and Performance-Oriented Rust Bindings\\for the Kiwi Korean Morphological Analyzer}
+
+% Replace with final author metadata before submission.
+\author{
+Jai-Chang Park
+}
+\date{February 17, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+This report presents \texttt{kiwi-rs}, a Rust library that exposes the public Kiwi C API through a high-level and safety-oriented interface for Korean NLP. The implementation combines dynamic symbol loading, ownership-safe handle wrappers, runtime capability checks, and auto-bootstrap for library/model assets. We evaluate \texttt{kiwi-rs} against \texttt{kiwipiepy} under matched conditions using repeated-input (warm-cache) and varied-input (near no-cache) workloads with bootstrap confidence intervals and sink-parity checks. On a dataset of 192 Korean texts across 8 categories, \texttt{kiwi-rs} shows measurable speedups on selected features (e.g., \texttt{join}: \(3.85\times\), \texttt{tokenize\_many\_batch}: \(23.18\times\), \texttt{split\_into\_sents\_with\_tokens}: \(67.75\times\)) while other paths remain close to parity or statistically inconclusive under conservative decision rules. We report design choices, reproducibility metadata, and parity boundaries.
+\end{abstract}
+
+\section{Introduction}
+Rust adoption in production NLP systems has increased due to predictable performance, explicit ownership semantics, and strong tooling~\cite{rust_lang}. However, high-quality language analyzers are often distributed as C/C++ runtimes with Python-first interfaces~\cite{kiwi_repo,kiwipiepy}. This creates a practical gap: teams that build Rust services need bindings that are more than thin FFI wrappers.
+
+\texttt{kiwi-rs} addresses this gap for Kiwi, a Korean morphological analyzer, by providing:
+\begin{itemize}[leftmargin=1.5em]
+    \item idiomatic Rust APIs for common analysis pipelines;
+    \item explicit and safe ownership around FFI handles;
+    \item runtime compatibility checks for optional C API surfaces;
+    \item reproducible benchmarking utilities for Rust-vs-Python comparison.
+\end{itemize}
+
+This technical report describes the system architecture and presents benchmark evidence under externally reviewable conditions.
+
+\section{Scope and Contributions}
+As of version \texttt{0.1.4} (snapshot date: 2026-02-17), the project reports complete loader coverage for the published Kiwi C symbols (\(101/101\)) and broad support for high-level workflows in Rust~\cite{kiwi_rs_repo,kiwi_rs_crates}. The main contributions are:
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{A production-oriented Rust surface over Kiwi C API.} The library exposes core and advanced capabilities, including batch APIs, typo models, pretokenization constraints, UTF-16 variants, and semantic CoNg operations.
+    \item \textbf{A safety-first runtime model.} The implementation uses RAII cleanup (\texttt{Drop}), typed error propagation, runtime feature probing, and internal compatibility guards across object graphs.
+    \item \textbf{A practical bootstrap path.} \texttt{Kiwi::init()} can resolve or download matching runtime assets into cache, reducing setup friction while keeping explicit configuration paths available.
+    \item \textbf{A reproducible benchmark framework.} The repository includes paired Rust/Python harnesses, repeated and varied input modes, sink parity checks, and bootstrap confidence intervals for defensible speed claims.
+\end{enumerate}
+
+\section{System Design}
+\subsection{Dynamic Loading and Capability Detection}
+\texttt{kiwi-rs} loads Kiwi symbols dynamically at runtime and resolves optional APIs when available~\cite{kiwi_rs_repo}. Instead of hard-linking a single ABI assumption, the library checks capability flags (e.g., UTF-16, stream builder init, multi-line UTF-16 analysis support) before exposing optional paths. This design reduces failure modes across heterogeneous deployment environments.
+
+\subsection{Ownership and Handle Safety}
+Core runtime objects (library, analyzer, builder, typo model, tokenizer, and intermediate result handles) are wrapped in Rust structs and released via deterministic \texttt{Drop} implementations. Internally shared runtime state uses \texttt{Arc}, while cross-object validity checks prevent accidental mixing of handles originating from different loaded libraries. This avoids a common FFI class of undefined behavior.
+
+\subsection{Error Model}
+Public APIs return a typed \texttt{Result<T, KiwiError>} with distinct categories:
+\begin{itemize}[leftmargin=1.5em]
+    \item \texttt{LibraryLoad}, \texttt{SymbolLoad}, \texttt{NulByte};
+    \item \texttt{InvalidArgument}, \texttt{Bootstrap}, \texttt{Api}.
+\end{itemize}
+This separation improves observability for deployment issues compared to string-only error channels.
+
+\subsection{Initialization Paths}
+The library supports three initialization styles:
+\begin{enumerate}[leftmargin=1.5em]
+    \item \texttt{Kiwi::init()} for auto-bootstrap and cache-based setup;
+    \item \texttt{Kiwi::new()} for environment-driven explicit paths;
+    \item \texttt{Kiwi::from\_config(...)} for fully controlled runtime configuration.
+\end{enumerate}
+
+In auto-bootstrap mode, the runtime resolves release metadata, downloads matching archives, and extracts them to an OS-appropriate cache root (or \texttt{KIWI\_RS\_CACHE\_DIR} override).
+
+\subsection{Inference Hot-Path Caching}
+The implementation includes lightweight in-process caches for join, tokenize, analyze, split, and glue operations using bounded queues. While this significantly improves repeated-input throughput, the benchmark protocol explicitly separates repeated-input and varied-input runs to prevent cache-inflated claims.
+
+\section{API Coverage and Parity Boundaries}
+\texttt{kiwi-rs} covers most C API-backed flows and exposes them with Rust-first signatures. However, full \texttt{kiwipiepy} parity is intentionally partial: several Python/C++-specific surfaces (e.g., template layer, dataset/training helpers beyond C API, some utility classes) are currently outside scope~\cite{kiwipiepy,kiwi_repo,kiwi_rs_repo}. This is a design constraint, not a bug, and should be evaluated against deployment requirements.
+
+\section{Evaluation Methodology}
+\subsection{Benchmark Design}
+The benchmark protocol compares \texttt{kiwi-rs} and \texttt{kiwipiepy} under aligned settings:
+\begin{itemize}[leftmargin=1.5em]
+    \item same text workload and dataset source;
+    \item same warmup/iteration schedules;
+    \item alternating engine order to reduce order bias;
+    \item sink parity checks to validate workload equivalence;
+    \item bootstrap confidence intervals (95\%) and \(P(\text{ratio}>1)\).
+\end{itemize}
+
+Decision thresholds follow a practical equivalence band of \(\pm 5\%\): robust wins require confidence intervals entirely above 1.05.
+
+\subsection{Dataset and Environment}
+The dataset benchmark uses \texttt{benchmarks/datasets/swe\_textset\_v2.tsv}:
+\begin{itemize}[leftmargin=1.5em]
+    \item 192 rows, 192 unique texts, 8 categories;
+    \item SHA-256: \texttt{8c81b8e8d0c4272f96c05e6851da10759f02361caa0a2acb881dd72e642f4696};
+    \item text length (characters): min 14, median 63, max 192.
+\end{itemize}
+
+Reported runs were executed on macOS 15.7.4 (arm64), Rust 1.93.1, Python 3.14.3, and \texttt{kiwipiepy} 0.22.2, with \(5\) repeats and \(2000\) bootstrap samples.
+
+\section{Results}
+\subsection{Varied-Input (Near No-Cache) Results}
+Table~\ref{tab:varied} reports representative features from the varied-input profile. Clear gains appear in \texttt{join}, \texttt{tokenize\_many\_batch}, and \texttt{split\_into\_sents\_with\_tokens}. Other features remain near parity or inconclusive under the strict decision rule.
+
+\begin{table}[t]
+\centering
+\caption{Selected throughput ratios on varied-input profile (\texttt{kiwi-rs} / \texttt{kiwipiepy}).}
+\label{tab:varied}
+\begin{tabular}{lccc}
+\toprule
+Feature & Ratio & 95\% CI & Decision \\
+\midrule
+\texttt{tokenize} & 1.49x & [0.97, 1.55] & inconclusive \\
+\texttt{split\_into\_sents} & 1.06x & [1.02, 1.12] & likely faster \\
+\texttt{split\_into\_sents\_with\_tokens} & 67.75x & [63.09, 69.85] & robust faster \\
+\texttt{space} & 1.12x & [1.05, 1.21] & likely faster \\
+\texttt{join} & 3.85x & [3.68, 4.40] & robust faster \\
+\texttt{glue} & 1.56x & [1.43, 1.68] & robust faster \\
+\texttt{analyze\_many\_native} & 0.92x & [0.70, 1.00] & inconclusive \\
+\texttt{tokenize\_many\_batch} & 23.18x & [21.05, 23.59] & robust faster \\
+\texttt{space\_many\_batch} & 0.98x & [0.89, 1.47] & inconclusive \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All listed features passed sink parity checks (\(1.0000\times\) ratio), indicating equivalent measured workloads between engines for the compared runs.
+
+\subsection{Repeated-Input (Warm-Cache) Results}
+Repeated-input measurements show substantially larger speedups for cache-sensitive paths (e.g., \texttt{tokenize}: \(156.03\times\), \texttt{glue}: \(542.54\times\), \texttt{split\_into\_sents}: \(9445.91\times\)). These values are best interpreted as warm-cache upper bounds, not as default deployment expectations.
+
+\subsection{Category-Stratified Snapshot}
+In addition to overall varied-input runs, we used category-stratified evaluation on 8 dataset categories (\texttt{code\_mixed}, \texttt{colloquial}, \texttt{ecommerce}, \texttt{finance}, \texttt{longform}, \texttt{news}, \texttt{tech}, \texttt{typo\_noisy}). Table~\ref{tab:category} summarizes per-category median relative throughput and the weakest feature in each category.
+
+\begin{table}[t]
+\centering
+\caption{Category-stratified summary (varied input, per-category runs).}
+\label{tab:category}
+\begin{tabular}{lcc}
+\toprule
+Category & Median Ratio & Weakest Feature (Ratio) \\
+\midrule
+\texttt{code\_mixed} & 40.23x & \texttt{join} (4.29x) \\
+\texttt{colloquial} & 53.59x & \texttt{join} (3.98x) \\
+\texttt{ecommerce} & 53.79x & \texttt{join} (4.27x) \\
+\texttt{finance} & 49.18x & \texttt{join} (3.62x) \\
+\texttt{longform} & 56.26x & \texttt{join} (4.70x) \\
+\texttt{news} & 53.04x & \texttt{join} (3.66x) \\
+\texttt{tech} & 43.72x & \texttt{join} (3.12x) \\
+\texttt{typo\_noisy} & 70.02x & \texttt{join} (3.97x) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+These category runs should be interpreted as a complementary robustness signal rather than a direct replacement for the overall varied-input baseline. In particular, category-local text pools can still include repeated forms and may amplify cache effects.
+
+\subsection{Startup Cost}
+Initialization latency is currently higher in Rust auto-bootstrap mode:
+\begin{itemize}[leftmargin=1.5em]
+    \item \texttt{kiwi-rs} median init: 1326.721 ms;
+    \item \texttt{kiwipiepy} median init: 622.918 ms.
+\end{itemize}
+Therefore, one-shot command-line workloads may see weaker end-to-end gains than steady-state service workloads.
+
+\section{Discussion}
+The results suggest two key points:
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{Steady-state behavior is feature-dependent.} Several operations show strong relative gains, while some batch paths remain near parity.
+    \item \textbf{Evaluation mode materially affects interpretation.} Warm-cache runs can overstate general speedups; varied-input runs offer a stricter baseline.
+\end{enumerate}
+
+For production systems, this implies a simple policy: use varied-input statistics for headline claims, and include repeated-input results as supplemental capacity bounds.
+
+\section{Threats to Validity}
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Single host profile.} Results were collected on one machine and one OS; cross-hardware variance is not yet quantified.
+    \item \textbf{Version snapshot effects.} Results depend on specific versions of Kiwi, \texttt{kiwi-rs}, \texttt{kiwipiepy}, Rust, and Python.
+    \item \textbf{Cache interactions.} Even varied-input configurations may retain partial repetition, especially in category-constrained pools.
+    \item \textbf{Process-level overhead differences.} Language runtime overheads and bridge paths differ between Rust and Python and can affect per-feature behavior.
+\end{itemize}
+
+\section{Limitations and Future Work}
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Single-machine benchmark scope.} Current results are from one hardware/OS stack.
+    \item \textbf{Startup gap.} \texttt{Kiwi::init()} convenience introduces startup overhead that should be reduced or amortized.
+    \item \textbf{Parity gaps.} Python/C++-specific layers remain out of scope under a strict C API binding strategy.
+    \item \textbf{Thread-safety assumptions in upstream runtime.} Some test paths are intentionally serialized around initialization due to observed instability in concurrent setup/teardown.
+\end{itemize}
+
+Planned work includes broader hardware validation, additional memory profiling, startup optimization, and clearly separated optional modules for non-C-API parity features.
+
+\section{Reproducibility Checklist}
+For external review, the following should be published with any claim:
+\begin{enumerate}[leftmargin=1.5em]
+    \item exact benchmark commands and flags;
+    \item dataset path and SHA-256 hash;
+    \item Rust/Python/package versions;
+    \item Git SHA and dirty/clean status;
+    \item varied-input and repeated-input outputs;
+    \item ratio CIs, \(P(\text{ratio}>1)\), and sink parity table.
+\end{enumerate}
+
+The repository already includes scripts and generated artifacts for this checklist in \path{tmp/feature_dataset_matrix_v2_*}.
+
+\section{Conclusion}
+\texttt{kiwi-rs} shows that a Rust-first binding over the Kiwi C API can provide practical ergonomics and explicit safety boundaries. The benchmark evidence supports substantial gains for selected features while also highlighting near-parity regions and startup trade-offs. Overall, the library is a practical option for Rust-native Korean NLP services when paired with transparent, workload-aware evaluation.
+
+\section*{Artifact and License Notes}
+\texttt{kiwi-rs} is released under LGPL-2.1-or-later. This manuscript reports software benchmark data; it does not contain user-identifying or sensitive human-subject data.
+
+\bibliographystyle{plain}
+\bibliography{references}
+
+\appendix
+\section{Benchmark Command Template}
+\begin{verbatim}
+cd kiwi-rs
+mkdir -p tmp
+.venv-bench/bin/python scripts/compare_feature_bench.py \
+  --dataset-tsv benchmarks/datasets/swe_textset_v2.tsv \
+  --input-mode varied \
+  --warmup 20 --iters 300 \
+  --batch-size 128 --batch-iters 60 \
+  --repeats 5 \
+  --engine-order alternate \
+  --sleep-between-engines-ms 100 \
+  --sleep-between-runs-ms 200 \
+  --sink-warning-threshold 0.05 \
+  --bootstrap-samples 2000 \
+  --equivalence-band 0.05 \
+  --strict-sink-check \
+  --md-out tmp/feature_dataset_matrix_v2_varied_r5_i300/overall.md \
+  --json-out tmp/feature_dataset_matrix_v2_varied_r5_i300/overall.json
+\end{verbatim}
+
+\end{document}
