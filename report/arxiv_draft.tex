@@ -40,7 +40,7 @@ Jai-Chang Park
 \maketitle
 
 \begin{abstract}
-This report presents \texttt{kiwi-rs}, a Rust library that exposes the public Kiwi C API through a high-level and safety-oriented interface for Korean NLP. The implementation combines dynamic symbol loading, ownership-safe handle wrappers, runtime capability checks, and auto-bootstrap for library/model assets. We evaluate \texttt{kiwi-rs} against \texttt{kiwipiepy} under matched conditions using repeated-input (warm-cache) and varied-input (near no-cache) workloads with bootstrap confidence intervals and sink-parity checks. On a dataset of 192 Korean texts across 8 categories, \texttt{kiwi-rs} shows measurable speedups on selected features (e.g., \texttt{join}: \(3.85\times\), \texttt{tokenize\_many\_batch}: \(23.18\times\), \texttt{split\_into\_sents\_with\_tokens}: \(67.75\times\)) while other paths remain close to parity or statistically inconclusive under conservative decision rules. We report design choices, reproducibility metadata, and parity boundaries.
+This report presents \texttt{kiwi-rs}, a Rust library that exposes the public Kiwi C API through a high-level and safety-oriented interface for Korean NLP. The implementation combines dynamic symbol loading, ownership-safe handle wrappers, runtime capability checks, and auto-bootstrap for library/model assets, and it includes an agent-skill package for reliable LLM-assisted onboarding. We evaluate \texttt{kiwi-rs} against \texttt{kiwipiepy} under matched conditions using repeated-input (warm-cache) and varied-input (near no-cache) workloads with bootstrap confidence intervals and sink-parity checks. On a dataset of 192 Korean texts across 8 categories, \texttt{kiwi-rs} shows measurable speedups on selected features (e.g., \texttt{join}: \(3.85\times\), \texttt{tokenize\_many\_batch}: \(23.18\times\), \texttt{split\_into\_sents\_with\_tokens}: \(67.75\times\)) while other paths remain close to parity or statistically inconclusive under conservative decision rules. We report design choices, reproducibility metadata, and parity boundaries.
 \end{abstract}
 
 \section{Introduction}
@@ -63,6 +63,7 @@ As of version \texttt{0.1.4} (snapshot date: 2026-02-17), the project reports co
     \item \textbf{A safety-first runtime model.} The implementation uses RAII cleanup (\texttt{Drop}), typed error propagation, runtime feature probing, and internal compatibility guards across object graphs.
     \item \textbf{A practical bootstrap path.} \texttt{Kiwi::init()} can resolve or download matching runtime assets into cache, reducing setup friction while keeping explicit configuration paths available.
     \item \textbf{A reproducible benchmark framework.} The repository includes paired Rust/Python harnesses, repeated and varied input modes, sink parity checks, and bootstrap confidence intervals for defensible speed claims.
+    \item \textbf{An agent-skill artifact for developer productivity.} The repository packages an assistant skill that constrains LLM responses to runnable code, explicit initialization choices, one-step validation commands, and request-specific pitfalls.
 \end{enumerate}
 
 \section{System Design}
@@ -94,7 +95,38 @@ In auto-bootstrap mode, the runtime resolves release metadata, downloads matchin
 The implementation includes lightweight in-process caches for join, tokenize, analyze, split, and glue operations using bounded queues. While this significantly improves repeated-input throughput, the benchmark protocol explicitly separates repeated-input and varied-input runs to prevent cache-inflated claims.
 
 \section{API Coverage and Parity Boundaries}
-\texttt{kiwi-rs} covers most C API-backed flows and exposes them with Rust-first signatures. However, full \texttt{kiwipiepy} parity is intentionally partial: several Python/C++-specific surfaces (e.g., template layer, dataset/training helpers beyond C API, some utility classes) are currently outside scope~\cite{kiwipiepy,kiwi_repo,kiwi_rs_repo}. This is a design constraint, not a bug, and should be evaluated against deployment requirements.
+\texttt{kiwi-rs} covers most C API-backed flows and exposes them with Rust-first signatures. Table~\ref{tab:api_surface} summarizes the currently supported API surface by subsystem.
+
+\begin{table}[t]
+\centering
+\caption{Supported API surface in \texttt{kiwi-rs} (representative groups).}
+\label{tab:api_surface}
+\begin{tabular}{p{0.30\linewidth}p{0.58\linewidth}}
+\toprule
+Area & Representative APIs \\
+\midrule
+Initialization and setup & \texttt{Kiwi::init}, \texttt{Kiwi::new}, \texttt{Kiwi::from\_config}, \texttt{Kiwi::init\_direct} \\
+Core inference & \texttt{analyze*}, \texttt{tokenize*}, \texttt{split\_into\_sents*}, \texttt{space*}, \texttt{glue*}, \texttt{join*} \\
+Batch and native paths & \texttt{analyze\_many\_with\_options}, \texttt{analyze\_many\_via\_native}, \texttt{tokenize\_many}, \texttt{tokenize\_many\_with\_echo} \\
+Builder and lexicon customization & \texttt{add\_user\_word}, \texttt{add\_pre\_analyzed\_word}, \texttt{load\_user\_dictionary}, \texttt{add\_rule}, \texttt{add\_re\_rule}, \texttt{extract\_words*} \\
+Constraint and typo models & \texttt{MorphemeSet}, \texttt{Pretokenized}, \texttt{KiwiTypo}, default typo presets \\
+Extended APIs & \texttt{SwTokenizer}, CoNg similarity/prediction APIs, UTF-16 variants with runtime support checks \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+At the C API layer, symbol loading coverage is complete (\(101/101\) loader entries at the reported snapshot). For \texttt{kiwipiepy}-surface parity tracking, the current matrix reports 12 \texttt{Equivalent}, 19 \texttt{Partial}, and 9 \texttt{Unavailable} rows (total 40 tracked rows). Full parity is therefore intentionally partial: several Python/C++-specific surfaces (e.g., template layer, dataset/training helpers beyond C API, some utility classes) remain out of scope~\cite{kiwipiepy,kiwi_repo,kiwi_rs_repo}.
+
+\subsection{Agent Skill for LLM-Assisted Usage}
+To reduce prompt ambiguity in AI-assisted development, \texttt{kiwi-rs} includes a local skill package (\texttt{skills/kiwi-rs-assistant/}) with:
+\begin{itemize}[leftmargin=1.5em]
+    \item a structured workflow that routes user intent to API families (tokenize/analyze/split/join, builder, typo, UTF-16, batch, and semantics);
+    \item explicit initialization path rules (\texttt{Kiwi::init}, \texttt{Kiwi::new}, \texttt{Kiwi::from\_config}, or builder flow);
+    \item a response contract requiring runnable Rust code, a concrete verification command, and request-specific pitfalls;
+    \item troubleshooting and parity guardrails that map common errors to concrete fixes and prevent unsupported parity claims.
+\end{itemize}
+
+This skill packaging is not presented as a model-quality contribution; instead, it is a reproducible developer-facing artifact that can improve consistency of generated integration code.
 
 \section{Evaluation Methodology}
 \subsection{Benchmark Design}
@@ -173,6 +205,60 @@ Category & Median Ratio & Weakest Feature (Ratio) \\
 \end{table}
 
 These category runs should be interpreted as a complementary robustness signal rather than a direct replacement for the overall varied-input baseline. In particular, category-local text pools can still include repeated forms and may amplify cache effects.
+
+\subsection{Repeated vs Varied Snapshot (All Common Features)}
+To provide full cross-mode visibility, Table~\ref{tab:full_snapshot} reports all 15 common benchmark features shared by both engines. This table includes repeated-input and varied-input ratios, plus \(\Delta\%\) relative to parity (\(1.0\times\)).
+
+\begin{table}[t]
+\centering
+\caption{Full repeated-vs-varied ratio snapshot (\texttt{kiwi-rs} / \texttt{kiwipiepy}) for all common features.}
+\label{tab:full_snapshot}
+\scriptsize
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lrrrr}
+\toprule
+Feature & Repeated Ratio & Repeated \(\Delta\%\) & Varied Ratio & Varied \(\Delta\%\) \\
+\midrule
+\texttt{analyze\_many\_loop} & 150.10x & +14909.5\% & 0.96x & -3.9\% \\
+\texttt{analyze\_many\_native} & 24.10x & +2309.9\% & 0.92x & -7.9\% \\
+\texttt{analyze\_top1} & 148.44x & +14744.4\% & 1.00x & +0.3\% \\
+\texttt{batch\_analyze\_native} & 24.10x & +2309.9\% & 0.92x & -7.9\% \\
+\texttt{glue} & 542.54x & +54153.8\% & 1.56x & +56.2\% \\
+\texttt{join} & 4.30x & +329.9\% & 3.85x & +285.1\% \\
+\texttt{space} & 99.02x & +9802.0\% & 1.12x & +11.8\% \\
+\texttt{space\_many\_batch} & 14.23x & +1322.6\% & 0.98x & -1.7\% \\
+\texttt{space\_many\_loop} & 83.17x & +8217.0\% & 1.05x & +5.0\% \\
+\texttt{split\_into\_sents} & 9445.91x & +944491.2\% & 1.06x & +6.4\% \\
+\texttt{split\_into\_sents\_with\_tokens} & 86.64x & +8564.1\% & 67.75x & +6675.4\% \\
+\texttt{split\_many\_loop} & 1.06x & +6.1\% & 0.92x & -8.3\% \\
+\texttt{tokenize} & 156.03x & +15503.4\% & 1.49x & +48.9\% \\
+\texttt{tokenize\_many\_batch} & 24.62x & +2362.2\% & 23.18x & +2217.9\% \\
+\texttt{tokenize\_many\_loop} & 160.42x & +15942.0\% & 153.21x & +15221.1\% \\
+\bottomrule
+\end{tabular}%
+}
+\normalsize
+\end{table}
+
+\subsection{Engine-Specific Features}
+Table~\ref{tab:engine_specific} reports features not shared between both engines in the current harness (4 Rust-only features and 1 Python-only feature).
+
+\begin{table}[t]
+\centering
+\caption{Engine-specific benchmark features (median calls/sec).}
+\label{tab:engine_specific}
+\begin{tabular}{lrr}
+\toprule
+Feature & Repeated & Varied \\
+\midrule
+\texttt{join\_prepared} (Rust-only) & 142877.01 & 145837.51 \\
+\texttt{join\_prepared\_utf16} (Rust-only) & 149083.73 & 149551.35 \\
+\texttt{joiner\_reuse} (Rust-only) & 1841428.46 & 1836727.20 \\
+\texttt{joiner\_reuse\_utf16} (Rust-only) & 2289342.35 & 2047194.66 \\
+\texttt{split\_many\_batch} (Python-only) & 127.54 & 100.10 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsection{Startup Cost}
 Initialization latency is currently higher in Rust auto-bootstrap mode:
