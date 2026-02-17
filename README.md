@@ -542,4 +542,6 @@ cargo package --allow-dirty
 
 ## License
 
-Same as Kiwi: LGPL v3.
+- `kiwi-rs` is licensed under **LGPL-2.1-or-later**.
+- The upstream Kiwi C library used by this project is distributed under LGPL 2.1 terms.
+- See [`LICENSE`](LICENSE) for the full license text.
