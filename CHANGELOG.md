@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-02-17
+
+### Changed
+- Refined benchmark readability in `README.md` and `README.ko.md` by:
+  - splitting absolute-value charts by engine to avoid overlapping bars,
+  - adding side-by-side numeric comparison tables for varied-input runs.
+- Corrected license metadata/docs to `LGPL-2.1-or-later` to match `LICENSE`.
+
 ## [0.1.3] - 2026-02-17
 
 ### Changed
