@@ -12,6 +12,12 @@ enum InputMode {
     Varied,
 }
 
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum InitMode {
+    Init,
+    New,
+}
+
 #[derive(Debug)]
 struct Cli {
     text: String,
@@ -24,6 +30,7 @@ struct Cli {
     variant_pool: usize,
     dataset_tsv: Option<String>,
     dataset_category: Option<String>,
+    init_mode: InitMode,
 }
 
 #[derive(Debug)]
@@ -37,7 +44,7 @@ struct BenchResult {
 
 fn print_usage() {
     eprintln!(
-        "Usage: cargo run --release --example bench_features -- [--text <text>] [--warmup <n>] [--iters <n>] [--batch-size <n>] [--batch-iters <n>] [--join-lm-search <true|false>] [--input-mode <repeated|varied>] [--variant-pool <n>] [--dataset-tsv <path>] [--dataset-category <name>]"
+        "Usage: cargo run --release --example bench_features -- [--text <text>] [--warmup <n>] [--iters <n>] [--batch-size <n>] [--batch-iters <n>] [--join-lm-search <true|false>] [--input-mode <repeated|varied>] [--variant-pool <n>] [--init-mode <init|new>] [--dataset-tsv <path>] [--dataset-category <name>]"
     );
 }
 
@@ -67,6 +74,15 @@ fn parse_input_mode_flag(name: &str, value: Option<String>) -> Result<InputMode,
     }
 }
 
+fn parse_init_mode_flag(name: &str, value: Option<String>) -> Result<InitMode, String> {
+    let raw = value.ok_or_else(|| format!("{name} requires a value"))?;
+    match raw.as_str() {
+        "init" => Ok(InitMode::Init),
+        "new" => Ok(InitMode::New),
+        _ => Err(format!("invalid {name} value '{raw}': expected init|new")),
+    }
+}
+
 fn parse_args() -> Result<Cli, String> {
     let mut text = "아버지가방에들어가신다.".to_string();
     let mut warmup = 100usize;
@@ -78,6 +94,7 @@ fn parse_args() -> Result<Cli, String> {
     let mut variant_pool = 4096usize;
     let mut dataset_tsv: Option<String> = None;
     let mut dataset_category: Option<String> = None;
+    let mut init_mode = InitMode::Init;
 
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
@@ -96,6 +113,7 @@ fn parse_args() -> Result<Cli, String> {
             }
             "--input-mode" => input_mode = parse_input_mode_flag("--input-mode", args.next())?,
             "--variant-pool" => variant_pool = parse_usize_flag("--variant-pool", args.next())?,
+            "--init-mode" => init_mode = parse_init_mode_flag("--init-mode", args.next())?,
             "--dataset-tsv" => {
                 dataset_tsv = Some(
                     args.next()
@@ -143,6 +161,7 @@ fn parse_args() -> Result<Cli, String> {
         variant_pool,
         dataset_tsv,
         dataset_category,
+        init_mode,
     })
 }
 
@@ -285,7 +304,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     })?;
 
     let init_start = Instant::now();
-    let kiwi = Kiwi::init()?;
+    let kiwi = match cli.init_mode {
+        InitMode::Init => Kiwi::init()?,
+        InitMode::New => Kiwi::new()?,
+    };
     let init_elapsed = init_start.elapsed().as_secs_f64() * 1_000.0;
 
     let options_top1 = AnalyzeOptions::default()
@@ -366,6 +388,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("batch_size={}", cli.batch_size);
     println!("batch_iters={}", cli.batch_iters);
     println!("join_lm_search={}", cli.join_lm_search);
+    println!(
+        "init_mode={}",
+        match cli.init_mode {
+            InitMode::Init => "init",
+            InitMode::New => "new",
+        }
+    );
     println!(
         "input_mode={}",
         match cli.input_mode {

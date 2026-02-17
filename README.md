@@ -1,6 +1,6 @@
 # kiwi-rs
 
-[Technical Report (PDF)](report/arxiv_draft.pdf) | [한국어 README](README.ko.md) | [kiwipiepy parity (EN)](docs/kiwipiepy_parity.md) | [kiwipiepy parity (KO)](docs/kiwipiepy_parity.ko.md)
+[Technical Report (PDF)](report/technical_report.pdf) | [한국어 README](README.ko.md) | [kiwipiepy parity (EN)](docs/kiwipiepy_parity.md) | [kiwipiepy parity (KO)](docs/kiwipiepy_parity.ko.md)
 
 Rust bindings for Kiwi via the official C API (`include/kiwi/capi.h`).
 

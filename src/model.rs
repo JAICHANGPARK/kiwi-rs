@@ -224,3 +224,123 @@ impl From<GlobalConfig> for KiwiGlobalConfigRaw {
         }
     }
 }
+
+#[cfg(test)]
+mod model_tests {
+    use super::{
+        GlobalConfig, KiwiGlobalConfigRaw, KiwiMorphemeRaw, KiwiTokenInfoRaw, MorphemeInfo,
+        PreAnalyzedToken, TokenInfo,
+    };
+
+    #[test]
+    fn pre_analyzed_token_new_and_span() {
+        let token = PreAnalyzedToken::new("형태소", "NNG").with_span(1, 3);
+        assert_eq!(token.form, "형태소");
+        assert_eq!(token.tag, "NNG");
+        assert_eq!(token.begin, Some(1));
+        assert_eq!(token.end, Some(3));
+    }
+
+    #[test]
+    fn token_info_from_raw_copies_all_fields() {
+        let raw = KiwiTokenInfoRaw {
+            chr_position: 3,
+            word_position: 2,
+            sent_position: 1,
+            line_number: 4,
+            length: 5,
+            tag: 9,
+            sense_or_script: 7,
+            score: 1.5,
+            typo_cost: 0.25,
+            typo_form_id: 11,
+            paired_token: 12,
+            sub_sent_position: 6,
+            dialect: 8,
+        };
+        let info = TokenInfo::from(raw);
+
+        assert_eq!(info.chr_position, 3);
+        assert_eq!(info.word_position, 2);
+        assert_eq!(info.sent_position, 1);
+        assert_eq!(info.line_number, 4);
+        assert_eq!(info.length, 5);
+        assert_eq!(info.tag, 9);
+        assert_eq!(info.sense_or_script, 7);
+        assert_eq!(info.score, 1.5);
+        assert_eq!(info.typo_cost, 0.25);
+        assert_eq!(info.typo_form_id, 11);
+        assert_eq!(info.paired_token, 12);
+        assert_eq!(info.sub_sent_position, 6);
+        assert_eq!(info.dialect, 8);
+    }
+
+    #[test]
+    fn morpheme_info_from_raw_copies_all_fields() {
+        let raw = KiwiMorphemeRaw {
+            tag: 5,
+            sense_id: 2,
+            user_score: 0.5,
+            lm_morpheme_id: 31,
+            orig_morpheme_id: 17,
+            dialect: 4,
+        };
+        let info = MorphemeInfo::from(raw);
+
+        assert_eq!(info.tag, 5);
+        assert_eq!(info.sense_id, 2);
+        assert_eq!(info.user_score, 0.5);
+        assert_eq!(info.lm_morpheme_id, 31);
+        assert_eq!(info.orig_morpheme_id, 17);
+        assert_eq!(info.dialect, 4);
+    }
+
+    #[test]
+    fn global_config_default_matches_raw_defaults() {
+        let config = GlobalConfig::default();
+        assert!(config.integrate_allomorph);
+        assert_eq!(config.cut_off_threshold, 8.0);
+        assert_eq!(config.unk_form_score_scale, 5.0);
+        assert_eq!(config.unk_form_score_bias, 5.0);
+        assert_eq!(config.space_penalty, 7.0);
+        assert_eq!(config.typo_cost_weight, 6.0);
+        assert_eq!(config.max_unk_form_size, 6);
+        assert_eq!(config.space_tolerance, 0);
+    }
+
+    #[test]
+    fn global_config_round_trip_preserves_values() {
+        let original = GlobalConfig {
+            integrate_allomorph: false,
+            cut_off_threshold: 4.2,
+            unk_form_score_scale: 1.3,
+            unk_form_score_bias: 0.4,
+            space_penalty: 9.0,
+            typo_cost_weight: 2.5,
+            max_unk_form_size: 12,
+            space_tolerance: 3,
+        };
+
+        let raw = KiwiGlobalConfigRaw::from(original);
+        assert_eq!(raw.integrate_allomorph, 0);
+
+        let round_trip = GlobalConfig::from(raw);
+        assert!(!round_trip.integrate_allomorph);
+        assert_eq!(round_trip.cut_off_threshold, 4.2);
+        assert_eq!(round_trip.unk_form_score_scale, 1.3);
+        assert_eq!(round_trip.unk_form_score_bias, 0.4);
+        assert_eq!(round_trip.space_penalty, 9.0);
+        assert_eq!(round_trip.typo_cost_weight, 2.5);
+        assert_eq!(round_trip.max_unk_form_size, 12);
+        assert_eq!(round_trip.space_tolerance, 3);
+    }
+
+    #[test]
+    fn global_config_to_raw_sets_integrate_allomorph_flag() {
+        let raw = KiwiGlobalConfigRaw::from(GlobalConfig {
+            integrate_allomorph: true,
+            ..GlobalConfig::default()
+        });
+        assert_eq!(raw.integrate_allomorph, 1);
+    }
+}

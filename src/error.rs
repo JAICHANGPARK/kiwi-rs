@@ -40,3 +40,41 @@ impl From<std::ffi::NulError> for KiwiError {
 
 /// Convenience alias used throughout the crate.
 pub type Result<T> = std::result::Result<T, KiwiError>;
+
+#[cfg(test)]
+mod error_tests {
+    use super::KiwiError;
+    use std::ffi::CString;
+
+    #[test]
+    fn display_messages_are_human_readable() {
+        assert_eq!(
+            KiwiError::LibraryLoad("missing".to_string()).to_string(),
+            "failed to load library: missing"
+        );
+        assert_eq!(
+            KiwiError::SymbolLoad("kiwi_version".to_string()).to_string(),
+            "failed to load symbol: kiwi_version"
+        );
+        assert_eq!(
+            KiwiError::InvalidArgument("bad arg".to_string()).to_string(),
+            "invalid argument: bad arg"
+        );
+        assert_eq!(
+            KiwiError::Bootstrap("network".to_string()).to_string(),
+            "bootstrap error: network"
+        );
+        assert_eq!(
+            KiwiError::Api("ffi failed".to_string()).to_string(),
+            "kiwi api error: ffi failed"
+        );
+    }
+
+    #[test]
+    fn nul_error_converts_to_kiwi_error() {
+        let nul = CString::new("ab\0cd").expect_err("expected interior NUL");
+        let error: KiwiError = nul.into();
+        assert!(matches!(error, KiwiError::NulByte(_)));
+        assert!(error.to_string().starts_with("string contains NUL byte:"));
+    }
+}

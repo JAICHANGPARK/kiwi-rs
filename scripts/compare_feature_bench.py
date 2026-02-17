@@ -131,6 +131,11 @@ def parse_args() -> argparse.Namespace:
         help="Python executable used for scripts/bench_features_kiwipiepy.py",
     )
     parser.add_argument(
+        "--python-model-path",
+        default="",
+        help="Optional model path passed to scripts/bench_features_kiwipiepy.py",
+    )
+    parser.add_argument(
         "--md-out",
         default="",
         help="Optional path to write markdown output.",
@@ -894,6 +899,8 @@ def main() -> int:
         py_cmd.extend(["--dataset-tsv", args.dataset_tsv])
         if args.dataset_category:
             py_cmd.extend(["--dataset-category", args.dataset_category])
+    if args.python_model_path:
+        py_cmd.extend(["--model-path", args.python_model_path])
 
     commands = {
         RUST_ENGINE: rust_cmd,
@@ -916,6 +923,7 @@ def main() -> int:
         "sink_warning_threshold_pct": args.sink_warning_threshold * 100.0,
         "bootstrap_samples": args.bootstrap_samples,
         "equivalence_band_pct": args.equivalence_band * 100.0,
+        "python_model_path": args.python_model_path,
         "rust_cmd": command_to_text(rust_cmd),
         "python_cmd": command_to_text(py_cmd),
     }

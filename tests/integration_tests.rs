@@ -32,24 +32,43 @@ fn run_add_user_word() {
         .builder(BuilderConfig::default())
         .expect("Failed to create builder");
 
-    // "데브시스터즈" is not in default dictionary (probably).
-    // Add it as NNP (Proper Noun)
-    builder
-        .add_user_word("데브시스터즈", "NNP", 10.0)
-        .expect("Failed to add user word");
+    // Some words can already exist in packaged dictionaries depending on version.
+    // Try a small set of unlikely custom nouns until one is accepted.
+    let mut added_word = None;
+    let mut last_error = None;
+    for candidate in [
+        "초희귀커버리지전용어",
+        "키위러스트검증전용명사",
+        "데브시스터즈",
+    ] {
+        match builder.add_user_word(candidate, "NNP", 10.0) {
+            Ok(()) => {
+                added_word = Some(candidate);
+                break;
+            }
+            Err(err) => last_error = Some(err.to_string()),
+        }
+    }
+
+    let added_word = added_word.unwrap_or_else(|| {
+        panic!(
+            "Failed to add any user word candidate; last error: {}",
+            last_error.unwrap_or_else(|| "unknown error".to_string())
+        )
+    });
 
     let kiwi = builder.build().expect("Failed to build Kiwi");
-    let text = "데브시스터즈에 입사했다.";
-    let res = kiwi.analyze(text).expect("Failed to analyze");
+    let text = format!("{added_word}에 입사했다.");
+    let res = kiwi.analyze(&text).expect("Failed to analyze");
 
     let top = &res[0];
     let has_user_word = top
         .tokens
         .iter()
-        .any(|t| t.form == "데브시스터즈" && t.tag == "NNP");
+        .any(|t| t.form == added_word && t.tag == "NNP");
     assert!(
         has_user_word,
-        "Should detect user added word '데브시스터즈'"
+        "Should detect user added word '{added_word}'"
     );
 }
 

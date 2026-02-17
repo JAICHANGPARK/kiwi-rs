@@ -66,6 +66,11 @@ def parse_args() -> argparse.Namespace:
         default="",
         help="Optional dataset category filter (requires --dataset-tsv).",
     )
+    parser.add_argument(
+        "--model-path",
+        default="",
+        help="Optional explicit model path passed to Kiwi(model_path=...).",
+    )
     args = parser.parse_args()
     if args.warmup < 0:
         parser.error("--warmup must be >= 0")
@@ -195,7 +200,7 @@ def main() -> int:
         return 1
 
     init_start = time.perf_counter()
-    kiwi = Kiwi()
+    kiwi = Kiwi(model_path=args.model_path) if args.model_path else Kiwi()
     init_ms = (time.perf_counter() - init_start) * 1000.0
 
     if args.dataset_tsv:
@@ -245,6 +250,7 @@ def main() -> int:
     print(f"variant_pool={args.variant_pool}")
     print(f"dataset_tsv={args.dataset_tsv}")
     print(f"dataset_category={args.dataset_category}")
+    print(f"model_path={args.model_path}")
     print(f"dataset_entries={len(single_variants)}")
     print(f"init_ms={init_ms:.3f}")
 

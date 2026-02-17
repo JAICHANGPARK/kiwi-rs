@@ -5623,7 +5623,12 @@ fn ends_with_ascii_word(value: &str) -> bool {
 
 #[cfg(test)]
 mod runtime_tests {
-    use super::{build_sentences_from_tokens, PreparedJoinMorphs};
+    use super::{
+        build_char_to_byte_map, build_sentences_from_tokens, byte_to_char_index,
+        ends_with_ascii_word, glue_fingerprint, ranges_overlap, reconstruct_spaced_text,
+        reset_hangul_whitespace, should_insert_space_between, should_strip_gap, slice_char_range,
+        to_c16_null_terminated, PreparedJoinMorphs,
+    };
     use crate::types::Token;
 
     fn token(
@@ -5650,6 +5655,20 @@ mod runtime_tests {
             tag_id: None,
             sense_or_script: None,
             dialect: None,
+        }
+    }
+
+    fn token_with_tag(
+        form: &str,
+        tag: &str,
+        position: usize,
+        length: usize,
+        sent_position: usize,
+        sub_sent_position: usize,
+    ) -> Token {
+        Token {
+            tag: tag.to_string(),
+            ..token(form, position, length, sent_position, sub_sent_position)
         }
     }
 
@@ -5705,5 +5724,108 @@ mod runtime_tests {
         let pairs = vec![("겨\0울", "NNG")];
         let result = PreparedJoinMorphs::from_pairs(&pairs);
         assert!(matches!(result, Err(crate::KiwiError::NulByte(_))));
+    }
+
+    #[test]
+    fn to_c16_null_terminated_rejects_interior_nul() {
+        let ok = to_c16_null_terminated(&[0xAC00, 0xB098]).expect("expected conversion to succeed");
+        assert_eq!(ok, vec![0xAC00, 0xB098, 0]);
+
+        let err = to_c16_null_terminated(&[0xAC00, 0, 0xB098]);
+        assert!(matches!(err, Err(crate::KiwiError::InvalidArgument(_))));
+    }
+
+    #[test]
+    fn ranges_overlap_handles_touching_and_overlapping_ranges() {
+        assert!(ranges_overlap(1, 4, 3, 6));
+        assert!(!ranges_overlap(1, 3, 3, 5));
+        assert!(!ranges_overlap(4, 6, 1, 4));
+    }
+
+    #[test]
+    fn char_byte_conversion_helpers_handle_multibyte_text() {
+        let text = "가a나";
+        let map = build_char_to_byte_map(text);
+        assert_eq!(map, vec![0, 3, 4, 7]);
+
+        assert_eq!(byte_to_char_index(text, 0), 0);
+        assert_eq!(byte_to_char_index(text, 1), 0);
+        assert_eq!(byte_to_char_index(text, 3), 1);
+        assert_eq!(byte_to_char_index(text, 4), 2);
+        assert_eq!(byte_to_char_index(text, 99), 3);
+
+        assert_eq!(slice_char_range(text, &map, 1, 3), "a나");
+        assert_eq!(slice_char_range(text, &map, 2, 20), "나");
+    }
+
+    #[test]
+    fn reset_hangul_whitespace_keeps_only_non_hangul_boundaries() {
+        let value = "가 나 ? 다 e";
+        assert_eq!(reset_hangul_whitespace(value), "가나? 다 e");
+    }
+
+    #[test]
+    fn spacing_tag_rules_cover_special_cases() {
+        assert!(should_insert_space_between("NNG", "NNG", "단어"));
+        assert!(should_insert_space_between("SF", "NP", "나"));
+        assert!(!should_insert_space_between("NNG", "VX", "하"));
+        assert!(!should_insert_space_between("NNG", "VX", "지"));
+
+        assert!(should_strip_gap(Some("SN"), "NNB", "개"));
+        assert!(should_strip_gap(None, "JKS", "가"));
+        assert!(!should_strip_gap(Some("NNG"), "NNG", "사과"));
+    }
+
+    #[test]
+    fn reconstruct_spaced_text_strips_josa_gap_and_inserts_predicate_space() {
+        let raw = "사과 를먹었다";
+        let tokens = vec![
+            token_with_tag("사과", "NNG", 0, 2, 0, 0),
+            token_with_tag("를", "JKO", 3, 1, 0, 0),
+            token_with_tag("먹었다", "VV", 4, 3, 0, 0),
+        ];
+
+        let spaced = reconstruct_spaced_text(raw, &tokens);
+        assert_eq!(spaced, "사과를 먹었다");
+    }
+
+    #[test]
+    fn glue_fingerprint_changes_with_structure() {
+        let first = glue_fingerprint(&["가", "나"], None);
+        let same = glue_fingerprint(&["가", "나"], None);
+        let with_newline = glue_fingerprint(&["가", "나"], Some(&[true]));
+        let merged = glue_fingerprint(&["가나"], None);
+
+        assert_eq!(first, same);
+        assert_ne!(first, with_newline);
+        assert_ne!(first, merged);
+    }
+
+    #[test]
+    fn ends_with_ascii_word_detects_last_non_whitespace_char() {
+        assert!(ends_with_ascii_word("한글 abc"));
+        assert!(ends_with_ascii_word("value42   "));
+        assert!(!ends_with_ascii_word("한글 끝."));
+        assert!(!ends_with_ascii_word("   "));
+    }
+
+    #[test]
+    fn build_sentences_without_token_payloads_leaves_tokens_none() {
+        let text = "가 나 다";
+        let tokens = vec![
+            token("가", 0, 1, 0, 1),
+            token("나", 2, 1, 0, 1),
+            token("다", 4, 1, 0, 0),
+        ];
+
+        let sentences = build_sentences_from_tokens(text, tokens, false, true);
+        assert_eq!(sentences.len(), 1);
+        assert!(sentences[0].tokens.is_none());
+        assert_eq!(sentences[0].subs.as_ref().map(Vec::len), Some(1));
+        assert!(sentences[0]
+            .subs
+            .as_ref()
+            .and_then(|subs| subs[0].tokens.as_ref())
+            .is_none());
     }
 }

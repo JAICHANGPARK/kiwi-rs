@@ -430,3 +430,472 @@ fn platform_library_filename() -> &'static str {
         "libkiwi.so"
     }
 }
+
+#[cfg(test)]
+mod bootstrap_tests {
+    use super::{
+        command_stderr, download_release_asset, extract_archive, extract_json_string_field,
+        extract_tgz_archive, fetch_release_metadata, find_asset_url, platform_library_asset_name,
+        platform_library_filename, prepare_assets, resolve_cache_root,
+    };
+    use crate::test_support::with_env_vars;
+    use std::fs;
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::{Path, PathBuf};
+    use std::process::{ExitStatus, Output};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn output_with(stderr: &[u8], exit_code: i32) -> Output {
+        Output {
+            status: status_with_code(exit_code),
+            stdout: Vec::new(),
+            stderr: stderr.to_vec(),
+        }
+    }
+
+    #[cfg(unix)]
+    fn status_with_code(exit_code: i32) -> ExitStatus {
+        use std::os::unix::process::ExitStatusExt;
+        ExitStatus::from_raw(exit_code << 8)
+    }
+
+    #[cfg(windows)]
+    fn status_with_code(exit_code: i32) -> ExitStatus {
+        use std::os::windows::process::ExitStatusExt;
+        ExitStatus::from_raw(exit_code as u32)
+    }
+
+    fn make_temp_dir(name: &str) -> PathBuf {
+        let suffix = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock should be monotonic")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("kiwi-rs-bootstrap-{name}-{suffix}"));
+        fs::create_dir_all(&path).expect("failed to create temp dir");
+        path
+    }
+
+    fn remove_tree(path: &Path) {
+        let _ = fs::remove_dir_all(path);
+    }
+
+    #[cfg(unix)]
+    fn write_executable(path: &Path, body: &str) {
+        fs::write(path, body).expect("failed to write script");
+        let mut perms = fs::metadata(path)
+            .expect("failed to read script metadata")
+            .permissions();
+        perms.set_mode(0o755);
+        fs::set_permissions(path, perms).expect("failed to set script mode");
+    }
+
+    #[cfg(unix)]
+    fn install_fake_tools(root: &Path) -> PathBuf {
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).expect("failed to create bin dir");
+        write_executable(
+            &bin.join("curl"),
+            r#"#!/bin/sh
+set -eu
+last=""
+out=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-o" ]; then
+    out="$arg"
+  fi
+  prev="$arg"
+  last="$arg"
+done
+if [ -n "${FAKE_CURL_LOG:-}" ]; then
+  printf '%s\n' "$last" >> "$FAKE_CURL_LOG"
+fi
+if [ "${FAKE_CURL_FAIL:-0}" = "1" ]; then
+  printf 'forced curl failure\n' >&2
+  exit 22
+fi
+if [ -n "$out" ]; then
+  mkdir -p "$(dirname "$out")"
+  printf 'archive for %s\n' "$last" > "$out"
+  exit 0
+fi
+if [ "${FAKE_CURL_BAD_TAG:-0}" = "1" ]; then
+  printf '{"tag_name":"v","assets":[]}'
+  exit 0
+fi
+lib="${FAKE_LIB_ASSET_NAME:-lib.tgz}"
+model="${FAKE_MODEL_ASSET_NAME:-model.tgz}"
+tag="${FAKE_RELEASE_TAG:-v9.9.9}"
+printf '{"tag_name":"%s","assets":[{"name":"%s","browser_download_url":"https://example/%s"},{"name":"%s","browser_download_url":"https://example/%s"}]}' "$tag" "$lib" "$lib" "$model" "$model"
+"#,
+        );
+        write_executable(
+            &bin.join("tar"),
+            r#"#!/bin/sh
+set -eu
+archive=""
+outdir=""
+prev=""
+for arg in "$@"; do
+  if [ "$prev" = "-xzf" ]; then
+    archive="$arg"
+  fi
+  if [ "$prev" = "-C" ]; then
+    outdir="$arg"
+  fi
+  prev="$arg"
+done
+if [ "${FAKE_TAR_FAIL:-0}" = "1" ]; then
+  printf 'forced tar failure\n' >&2
+  exit 9
+fi
+mkdir -p "$outdir"
+case "$archive" in
+  *model*)
+    mkdir -p "$outdir/models/cong/base"
+    printf 'ok\n' > "$outdir/models/cong/base/model.ok"
+    ;;
+  *)
+    mkdir -p "$outdir/lib"
+    if [ "${FAKE_SKIP_LIB_FILE:-0}" = "1" ]; then
+      exit 0
+    fi
+    : > "$outdir/lib/${FAKE_LIBRARY_FILENAME:-libkiwi.dylib}"
+    ;;
+esac
+"#,
+        );
+        bin
+    }
+
+    #[cfg(unix)]
+    fn with_fake_tools_env<T>(
+        root: &Path,
+        overrides: &[(&str, Option<&str>)],
+        f: impl FnOnce() -> T,
+    ) -> T {
+        let bin = install_fake_tools(root);
+        let inherited_path = std::env::var("PATH").unwrap_or_default();
+        let path = format!("{}:{inherited_path}", bin.display());
+
+        let mut env_overrides: Vec<(&str, Option<&str>)> = vec![("PATH", Some(path.as_str()))];
+        env_overrides.extend_from_slice(overrides);
+        with_env_vars(&env_overrides, f)
+    }
+
+    #[test]
+    fn extract_json_string_field_handles_basic_and_escaped_values() {
+        let json = r#"{"name":"kiwi","message":"line\n\"quoted\"","num":3}"#;
+        assert_eq!(
+            extract_json_string_field(json, "name").as_deref(),
+            Some("kiwi")
+        );
+        assert_eq!(
+            extract_json_string_field(json, "message").as_deref(),
+            Some("line\n\"quoted\"")
+        );
+        assert!(extract_json_string_field(json, "num").is_none());
+    }
+
+    #[test]
+    fn extract_json_string_field_returns_none_for_missing_or_unclosed_values() {
+        assert!(extract_json_string_field("{}", "tag_name").is_none());
+        assert!(extract_json_string_field(r#"{"tag_name":"v0.1"#, "tag_name").is_none());
+    }
+
+    #[test]
+    fn find_asset_url_returns_expected_url() {
+        let json = r#"{
+            "assets": [
+                {"name":"a.tgz","browser_download_url":"https://example/a.tgz"},
+                {"name":"b.tgz","browser_download_url":"https://example/b.tgz"}
+            ]
+        }"#;
+        assert_eq!(
+            find_asset_url(json, "b.tgz").as_deref(),
+            Some("https://example/b.tgz")
+        );
+    }
+
+    #[test]
+    fn find_asset_url_returns_none_when_url_field_missing() {
+        let json = r#"{"assets":[{"name":"a.tgz"}]}"#;
+        assert!(find_asset_url(json, "a.tgz").is_none());
+    }
+
+    #[test]
+    fn command_stderr_prefers_trimmed_stderr_text() {
+        let output = output_with(b"  failure details \n", 2);
+        assert_eq!(command_stderr(&output), "failure details");
+    }
+
+    #[test]
+    fn command_stderr_falls_back_to_exit_status_when_stderr_is_empty() {
+        let output = output_with(b"   \n\t", 5);
+        assert!(command_stderr(&output).starts_with("process exited with status"));
+    }
+
+    #[test]
+    fn resolve_cache_root_prefers_env_override() {
+        with_env_vars(
+            &[
+                ("KIWI_RS_CACHE_DIR", Some("/tmp/kiwi-rs-custom-cache")),
+                ("XDG_CACHE_HOME", None),
+                ("HOME", None),
+                ("LOCALAPPDATA", None),
+                ("USERPROFILE", None),
+            ],
+            || {
+                let cache = resolve_cache_root().expect("cache path should resolve");
+                assert_eq!(cache, Path::new("/tmp/kiwi-rs-custom-cache"));
+            },
+        );
+    }
+
+    #[test]
+    fn platform_library_filename_matches_target() {
+        #[cfg(target_os = "windows")]
+        assert_eq!(platform_library_filename(), "kiwi.dll");
+        #[cfg(target_os = "macos")]
+        assert_eq!(platform_library_filename(), "libkiwi.dylib");
+        #[cfg(all(unix, not(target_os = "macos")))]
+        assert_eq!(platform_library_filename(), "libkiwi.so");
+    }
+
+    #[test]
+    fn platform_library_asset_name_uses_target_pattern() {
+        let asset = platform_library_asset_name("0.22.2").expect("asset name should be supported");
+
+        #[cfg(target_os = "windows")]
+        assert!(asset.starts_with("kiwi_win_") && asset.ends_with("_v0.22.2.zip"));
+        #[cfg(target_os = "macos")]
+        assert!(asset.starts_with("kiwi_mac_") && asset.ends_with("_v0.22.2.tgz"));
+        #[cfg(target_os = "linux")]
+        assert!(asset.starts_with("kiwi_lnx_") && asset.ends_with("_v0.22.2.tgz"));
+    }
+
+    #[test]
+    fn extract_archive_rejects_unknown_extension() {
+        let result = extract_archive(Path::new("archive.unknown"), Path::new("/tmp"));
+        assert!(result.is_err());
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn extract_archive_zip_is_not_supported_on_non_windows() {
+        let result = extract_archive(Path::new("archive.zip"), Path::new("/tmp"));
+        assert!(result.is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fetch_release_metadata_normalizes_requested_version() {
+        let root = make_temp_dir("fetch-metadata");
+        let log = root.join("curl.log");
+        let log_path = log.to_str().expect("temp path should be utf-8");
+
+        with_fake_tools_env(
+            &root,
+            &[
+                ("FAKE_CURL_LOG", Some(log_path)),
+                ("FAKE_RELEASE_TAG", Some("v0.9.9")),
+            ],
+            || {
+                let latest = fetch_release_metadata("latest").expect("latest fetch should succeed");
+                assert!(latest.contains("\"tag_name\":\"v0.9.9\""));
+
+                let no_v =
+                    fetch_release_metadata("0.22.2").expect("non-prefixed tag fetch should work");
+                assert!(no_v.contains("\"tag_name\":\"v0.9.9\""));
+
+                let with_v =
+                    fetch_release_metadata("v0.22.2").expect("prefixed tag fetch should work");
+                assert!(with_v.contains("\"tag_name\":\"v0.9.9\""));
+            },
+        );
+
+        let logged = fs::read_to_string(&log).expect("failed to read curl log");
+        assert!(logged.contains("/latest"));
+        assert!(logged.contains("/tags/v0.22.2"));
+
+        remove_tree(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fetch_release_metadata_propagates_curl_failure() {
+        let root = make_temp_dir("fetch-metadata-failure");
+        with_fake_tools_env(&root, &[("FAKE_CURL_FAIL", Some("1"))], || {
+            let err = fetch_release_metadata("latest").expect_err("curl failure should bubble up");
+            assert!(err
+                .to_string()
+                .contains("curl failed while fetching release metadata"));
+        });
+        remove_tree(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn download_release_asset_skips_existing_file() {
+        let root = make_temp_dir("download-skip");
+        let output = root.join("existing.tgz");
+        fs::write(&output, b"already here").expect("failed to seed archive");
+
+        with_fake_tools_env(&root, &[("FAKE_CURL_FAIL", Some("1"))], || {
+            download_release_asset("{}", "ignored", &output).expect("existing file should skip");
+        });
+
+        let content = fs::read(&output).expect("failed to read file");
+        assert_eq!(content, b"already here");
+        remove_tree(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn download_release_asset_uses_resolved_asset_url() {
+        let root = make_temp_dir("download-ok");
+        let output = root.join("downloaded.tgz");
+        let release_json = r#"{
+            "assets": [
+                {"name":"target.tgz","browser_download_url":"https://example/target.tgz"}
+            ]
+        }"#;
+
+        with_fake_tools_env(&root, &[], || {
+            download_release_asset(release_json, "target.tgz", &output)
+                .expect("download should succeed with fake curl");
+        });
+
+        let content = fs::read_to_string(&output).expect("failed to read downloaded file");
+        assert!(content.contains("https://example/target.tgz"));
+        remove_tree(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn download_release_asset_errors_when_asset_is_missing() {
+        let root = make_temp_dir("download-missing");
+        let output = root.join("missing.tgz");
+
+        with_fake_tools_env(&root, &[], || {
+            let err = download_release_asset(r#"{"assets":[]}"#, "target.tgz", &output)
+                .expect_err("missing asset should error");
+            assert!(err.to_string().contains("release asset not found"));
+        });
+        remove_tree(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn extract_tgz_archive_propagates_tar_failure() {
+        let root = make_temp_dir("extract-failure");
+        let archive = root.join("archive.tgz");
+        fs::write(&archive, b"dummy").expect("failed to write archive");
+
+        with_fake_tools_env(&root, &[("FAKE_TAR_FAIL", Some("1"))], || {
+            let err = extract_tgz_archive(&archive, &root).expect_err("tar failure should error");
+            assert!(err.to_string().contains("tar extraction failed"));
+        });
+        remove_tree(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_assets_downloads_and_reuses_cache() {
+        let root = make_temp_dir("prepare-assets-success");
+        let cache_root = root.join("cache");
+        let version = "9.9.9";
+        let tag = format!("v{version}");
+        let lib_asset = platform_library_asset_name(version).expect("platform should be supported");
+        let model_asset = format!("kiwi_model_v{version}_base.tgz");
+        let library_filename = platform_library_filename();
+        let cache_root_str = cache_root.to_str().expect("temp path should be utf-8");
+
+        let prepared = with_fake_tools_env(
+            &root,
+            &[
+                ("KIWI_RS_CACHE_DIR", Some(cache_root_str)),
+                ("FAKE_RELEASE_TAG", Some(tag.as_str())),
+                ("FAKE_LIB_ASSET_NAME", Some(lib_asset.as_str())),
+                ("FAKE_MODEL_ASSET_NAME", Some(model_asset.as_str())),
+                ("FAKE_LIBRARY_FILENAME", Some(library_filename)),
+            ],
+            || prepare_assets("latest").expect("prepare assets should succeed"),
+        );
+        assert_eq!(prepared.tag_name, tag);
+        assert!(prepared.cache_dir.exists());
+        assert!(prepared.library_path.exists());
+        assert!(prepared.model_path.exists());
+
+        let cached = with_fake_tools_env(
+            &root,
+            &[
+                ("KIWI_RS_CACHE_DIR", Some(cache_root_str)),
+                ("FAKE_RELEASE_TAG", Some(tag.as_str())),
+                ("FAKE_LIB_ASSET_NAME", Some(lib_asset.as_str())),
+                ("FAKE_MODEL_ASSET_NAME", Some(model_asset.as_str())),
+                ("FAKE_LIBRARY_FILENAME", Some(library_filename)),
+                ("FAKE_TAR_FAIL", Some("1")),
+            ],
+            || prepare_assets("latest").expect("cache hit should bypass extraction"),
+        );
+        assert_eq!(cached.cache_dir, prepared.cache_dir);
+        assert_eq!(cached.library_path, prepared.library_path);
+        assert_eq!(cached.model_path, prepared.model_path);
+
+        remove_tree(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_assets_rejects_invalid_resolved_tag() {
+        let root = make_temp_dir("prepare-assets-bad-tag");
+        let cache_root = root.join("cache");
+        let cache_root_str = cache_root.to_str().expect("temp path should be utf-8");
+
+        with_fake_tools_env(
+            &root,
+            &[
+                ("KIWI_RS_CACHE_DIR", Some(cache_root_str)),
+                ("FAKE_CURL_BAD_TAG", Some("1")),
+            ],
+            || {
+                let err =
+                    prepare_assets("latest").expect_err("invalid release tag should fail fast");
+                assert!(err.to_string().contains("resolved invalid release tag"));
+            },
+        );
+        remove_tree(&root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn prepare_assets_errors_when_library_is_missing_after_extraction() {
+        let root = make_temp_dir("prepare-assets-missing-lib");
+        let cache_root = root.join("cache");
+        let version = "9.9.9";
+        let lib_asset = platform_library_asset_name(version).expect("platform should be supported");
+        let model_asset = format!("kiwi_model_v{version}_base.tgz");
+        let cache_root_str = cache_root.to_str().expect("temp path should be utf-8");
+
+        with_fake_tools_env(
+            &root,
+            &[
+                ("KIWI_RS_CACHE_DIR", Some(cache_root_str)),
+                ("FAKE_RELEASE_TAG", Some("v9.9.9")),
+                ("FAKE_LIB_ASSET_NAME", Some(lib_asset.as_str())),
+                ("FAKE_MODEL_ASSET_NAME", Some(model_asset.as_str())),
+                ("FAKE_SKIP_LIB_FILE", Some("1")),
+            ],
+            || {
+                let err =
+                    prepare_assets("latest").expect_err("missing library output should error");
+                assert!(err
+                    .to_string()
+                    .contains("library file was not found after extraction"));
+            },
+        );
+        remove_tree(&root);
+    }
+}
