@@ -481,6 +481,23 @@ xychart-beta
     bar [0.135248,0.138649,0.227299,0.233484,0.222360,0.201377,5.188234,5.252784,6.272204]
 ```
 
+Side-by-side numeric comparison (varied input, near no-cache):
+
+| Feature | `kiwi-rs` calls/sec | `kiwipiepy` calls/sec | Ratio (`x`) | Δ% | `kiwi-rs` avg_ms | `kiwipiepy` avg_ms |
+|---|---:|---:|---:|---:|---:|---:|
+| `tokenize` | 6956.95 | 7393.81 | 0.94x | -6.0% | 0.143741 | 0.135248 |
+| `analyze_top1` | 7319.22 | 7212.44 | 1.01x | +1.0% | 0.136627 | 0.138649 |
+| `split_into_sents` | 5104.73 | 4399.49 | 1.16x | +16.0% | 0.195897 | 0.227299 |
+| `split_into_sents_with_tokens` | 4372.13 | 4282.95 | 1.02x | +2.0% | 0.228721 | 0.233484 |
+| `space` | 4944.59 | 4497.21 | 1.10x | +10.0% | 0.202241 | 0.222360 |
+| `glue` | 5692.86 | 4965.80 | 1.15x | +15.0% | 0.175659 | 0.201377 |
+| `join` | 2927258.22 | 669983.08 | 4.37x | +337.0% | 0.000342 | 0.001493 |
+| `analyze_many_native` | 158.62 | 192.74 | 0.82x | -18.0% | 6.304233 | 5.188234 |
+| `tokenize_many_batch` | 151.12 | 190.38 | 0.79x | -21.0% | 6.617300 | 5.252784 |
+| `space_many_batch` | 150.76 | 159.43 | 0.95x | -5.0% | 6.632977 | 6.272204 |
+
+`Δ%` is `(kiwi-rs / kiwipiepy - 1) * 100`.
+
 Interpretation:
 
 - `join` is now faster on `kiwi-rs` for repeated identical morph sequences because the default `join` path reuses an internal LRU joiner cache.
