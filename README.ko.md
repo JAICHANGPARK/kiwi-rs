@@ -326,17 +326,20 @@ Python 전용 벤치 항목:
 
 다양 입력(no-cache 근사) 시나리오 상대값 스냅샷 (`input_mode=varied`, `variant_pool=8192`):
 
-| 기능 | Repeated 상대값 | Varied 상대값 |
-|---|---:|---:|
-| `tokenize` | 152.13x | 0.94x |
-| `analyze_top1` | 157.52x | 1.01x |
-| `split_into_sents` | 7602.80x | 1.16x |
-| `split_into_sents_with_tokens` | 51.42x | 1.02x |
-| `glue` | 817.15x | 1.15x |
-| `analyze_many_native` | 1.00x | 0.82x |
-| `tokenize_many_batch` | 17.02x | 0.79x |
-| `space_many_batch` | 1.01x | 0.95x |
-| `join` | 3.56x | 4.37x |
+| 기능 | Repeated 상대값 | Repeated 증감률 | Varied 상대값 | Varied 증감률 |
+|---|---:|---:|---:|---:|
+| `tokenize` | 152.13x | +15113.0% | 0.94x | -6.0% |
+| `analyze_top1` | 157.52x | +15652.0% | 1.01x | +1.0% |
+| `split_into_sents` | 7602.80x | +760180.0% | 1.16x | +16.0% |
+| `split_into_sents_with_tokens` | 51.42x | +5042.0% | 1.02x | +2.0% |
+| `glue` | 817.15x | +81615.0% | 1.15x | +15.0% |
+| `analyze_many_native` | 1.00x | +0.0% | 0.82x | -18.0% |
+| `tokenize_many_batch` | 17.02x | +1602.0% | 0.79x | -21.0% |
+| `space_many_batch` | 1.01x | +1.0% | 0.95x | -5.0% |
+| `join` | 3.56x | +256.0% | 4.37x | +337.0% |
+
+`증감률(%)` 계산식: `(kiwi-rs / kiwipiepy - 1) * 100`  
+`+`는 `kiwi-rs`가 더 빠름, `-`는 더 느림을 의미합니다.
 
 시각화 바 차트(상대 처리량):
 

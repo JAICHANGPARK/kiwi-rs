@@ -393,17 +393,20 @@ Python-only benchmark features:
 
 Varied-input (near no-cache) ratio snapshot (`input_mode=varied`, `variant_pool=8192`):
 
-| Feature | Repeated Ratio | Varied Ratio |
-|---|---:|---:|
-| `tokenize` | 152.13x | 0.94x |
-| `analyze_top1` | 157.52x | 1.01x |
-| `split_into_sents` | 7602.80x | 1.16x |
-| `split_into_sents_with_tokens` | 51.42x | 1.02x |
-| `glue` | 817.15x | 1.15x |
-| `analyze_many_native` | 1.00x | 0.82x |
-| `tokenize_many_batch` | 17.02x | 0.79x |
-| `space_many_batch` | 1.01x | 0.95x |
-| `join` | 3.56x | 4.37x |
+| Feature | Repeated Ratio | Repeated Δ% | Varied Ratio | Varied Δ% |
+|---|---:|---:|---:|---:|
+| `tokenize` | 152.13x | +15113.0% | 0.94x | -6.0% |
+| `analyze_top1` | 157.52x | +15652.0% | 1.01x | +1.0% |
+| `split_into_sents` | 7602.80x | +760180.0% | 1.16x | +16.0% |
+| `split_into_sents_with_tokens` | 51.42x | +5042.0% | 1.02x | +2.0% |
+| `glue` | 817.15x | +81615.0% | 1.15x | +15.0% |
+| `analyze_many_native` | 1.00x | +0.0% | 0.82x | -18.0% |
+| `tokenize_many_batch` | 17.02x | +1602.0% | 0.79x | -21.0% |
+| `space_many_batch` | 1.01x | +1.0% | 0.95x | -5.0% |
+| `join` | 3.56x | +256.0% | 4.37x | +337.0% |
+
+`Δ%` is `(kiwi-rs / kiwipiepy - 1) * 100`.  
+`+` means `kiwi-rs` is faster, `-` means slower.
 
 Visual bar charts (relative throughput):
 
