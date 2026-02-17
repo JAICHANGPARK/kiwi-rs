@@ -1,7 +1,8 @@
 use crate::bootstrap::{extract_json_string_field, find_asset_url};
 use crate::{
-    AnalyzeOptions, BuilderConfig, KiwiConfig, KIWI_MATCH_ALL_WITH_NORMALIZING,
-    KIWI_TYPO_BASIC_TYPO_SET, KIWI_TYPO_CONTINUAL_TYPO_SET, KIWI_TYPO_WITHOUT_TYPO,
+    AnalyzeOptions, BuilderConfig, KiwiConfig, KIWI_DIALECT_STANDARD,
+    KIWI_MATCH_ALL_WITH_NORMALIZING, KIWI_TYPO_BASIC_TYPO_SET, KIWI_TYPO_CONTINUAL_TYPO_SET,
+    KIWI_TYPO_WITHOUT_TYPO,
 };
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
@@ -45,6 +46,7 @@ fn analyze_options_default_is_reasonable() {
     assert_eq!(options.top_n, 1);
     assert_eq!(options.match_options, KIWI_MATCH_ALL_WITH_NORMALIZING);
     assert!(!options.open_ending);
+    assert_eq!(options.allowed_dialects, KIWI_DIALECT_STANDARD);
 }
 
 #[test]

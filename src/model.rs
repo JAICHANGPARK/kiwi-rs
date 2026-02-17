@@ -1,14 +1,24 @@
 use crate::native::{KiwiGlobalConfigRaw, KiwiMorphemeRaw, KiwiTokenInfoRaw};
 
+/// Pre-analyzed token element passed to
+/// [`crate::KiwiBuilder::add_pre_analyzed_word`].
+///
+/// `begin`/`end` are character offsets in the given surface form
+/// (Rust `str.chars()` index space, not byte offsets).
 #[derive(Debug, Clone)]
 pub struct PreAnalyzedToken {
+    /// Surface form.
     pub form: String,
+    /// Part-of-speech tag.
     pub tag: String,
+    /// Optional begin character offset.
     pub begin: Option<usize>,
+    /// Optional end character offset.
     pub end: Option<usize>,
 }
 
 impl PreAnalyzedToken {
+    /// Creates a token with only `form` and `tag`.
     pub fn new(form: impl Into<String>, tag: impl Into<String>) -> Self {
         Self {
             form: form.into(),
@@ -18,6 +28,7 @@ impl PreAnalyzedToken {
         }
     }
 
+    /// Sets explicit span offsets.
     pub fn with_span(mut self, begin: usize, end: usize) -> Self {
         self.begin = Some(begin);
         self.end = Some(end);
@@ -25,32 +36,57 @@ impl PreAnalyzedToken {
     }
 }
 
+/// Begin/end boundary for a sentence in character offsets.
+///
+/// Offsets are based on Rust `str.chars()` indexing.
 #[derive(Debug, Clone, Copy)]
 pub struct SentenceBoundary {
+    /// Inclusive begin offset.
     pub begin: usize,
+    /// Exclusive end offset.
     pub end: usize,
 }
 
+/// `(id, score)` pair returned by similarity and prediction APIs.
 #[derive(Debug, Clone, Copy)]
 pub struct SimilarityPair {
+    /// Identifier of a morpheme or context.
     pub id: u32,
+    /// Similarity or prediction score.
     pub score: f32,
 }
 
+/// Low-level token metadata returned by Kiwi C API.
+///
+/// Position-like fields (`chr_position`, `word_position`, `sent_position`) use
+/// Kiwi's character/token indexing semantics.
 #[derive(Debug, Clone, Copy)]
 pub struct TokenInfo {
+    /// Character position.
     pub chr_position: u32,
+    /// Word position.
     pub word_position: u32,
+    /// Sentence position.
     pub sent_position: u32,
+    /// Line number.
     pub line_number: u32,
+    /// Token length.
     pub length: u16,
+    /// Numeric tag id.
     pub tag: u8,
+    /// Sense id or script id.
     pub sense_or_script: u8,
+    /// Token score.
     pub score: f32,
+    /// Typo cost.
     pub typo_cost: f32,
+    /// Typo form id.
     pub typo_form_id: u32,
+    /// Paired token id.
     pub paired_token: u32,
+    /// Sub-sentence position.
     pub sub_sent_position: u32,
+    /// Dialect id.
     pub dialect: u16,
 }
 
@@ -74,21 +110,33 @@ impl From<KiwiTokenInfoRaw> for TokenInfo {
     }
 }
 
+/// Candidate extracted word from `extract_words*` builder APIs.
 #[derive(Debug, Clone)]
 pub struct ExtractedWord {
+    /// Surface form.
     pub form: String,
+    /// Extraction score.
     pub score: f32,
+    /// Observed frequency.
     pub frequency: i32,
+    /// POS-specific score from Kiwi.
     pub pos_score: f32,
 }
 
+/// Morpheme metadata from dictionary lookup APIs.
 #[derive(Debug, Clone, Copy)]
 pub struct MorphemeInfo {
+    /// Numeric tag id.
     pub tag: u8,
+    /// Sense id.
     pub sense_id: u8,
+    /// User dictionary score.
     pub user_score: f32,
+    /// Language-model morpheme id.
     pub lm_morpheme_id: u32,
+    /// Original morpheme id.
     pub orig_morpheme_id: u32,
+    /// Dialect id.
     pub dialect: u16,
 }
 
@@ -105,24 +153,39 @@ impl From<KiwiMorphemeRaw> for MorphemeInfo {
     }
 }
 
+/// Morpheme information with resolved string fields.
 #[derive(Debug, Clone)]
 pub struct MorphemeSense {
+    /// Morpheme id.
     pub morph_id: u32,
+    /// Morpheme form.
     pub form: String,
+    /// Morpheme tag.
     pub tag: String,
+    /// Sense id.
     pub sense_id: u8,
+    /// Dialect id.
     pub dialect: u16,
 }
 
+/// Global runtime parameters for Kiwi inference behavior.
 #[derive(Debug, Clone, Copy)]
 pub struct GlobalConfig {
+    /// Whether to integrate allomorph variants.
     pub integrate_allomorph: bool,
+    /// Candidate cut-off threshold.
     pub cut_off_threshold: f32,
+    /// Scale applied to unknown-form score.
     pub unk_form_score_scale: f32,
+    /// Bias applied to unknown-form score.
     pub unk_form_score_bias: f32,
+    /// Penalty for spacing decisions.
     pub space_penalty: f32,
+    /// Weight applied to typo costs.
     pub typo_cost_weight: f32,
+    /// Maximum unknown token length.
     pub max_unk_form_size: u32,
+    /// Allowed whitespace tolerance during analysis.
     pub space_tolerance: u32,
 }
 

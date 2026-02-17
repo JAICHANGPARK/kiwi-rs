@@ -581,6 +581,9 @@ pub(crate) struct DynamicLibrary {
     handle: *mut c_void,
 }
 
+unsafe impl Send for DynamicLibrary {}
+unsafe impl Sync for DynamicLibrary {}
+
 impl DynamicLibrary {
     pub(crate) fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
         let path_string = path.as_ref().to_string_lossy().to_string();
@@ -750,6 +753,7 @@ unsafe fn platform_symbol(handle: *mut c_void, symbol: *const c_char) -> *mut c_
 }
 
 #[cfg(unix)]
+#[allow(dead_code)]
 unsafe fn platform_close(handle: *mut c_void) {
     let _ = dlclose(handle);
 }

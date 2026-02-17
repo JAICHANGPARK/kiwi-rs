@@ -1,0 +1,63 @@
+# kiwi-rs
+
+Rust bindings for Kiwi via the official C API (`include/kiwi/capi.h`).
+
+Primary docs:
+- README (English): `README.md`
+- README (Korean): `README.ko.md`
+- kiwipiepy parity (English): `docs/kiwipiepy_parity.md`
+- kiwipiepy parity (Korean): `docs/kiwipiepy_parity.ko.md`
+
+Core crate entry:
+- `src/lib.rs`
+- Public error type: `src/error.rs`
+
+Initialization paths:
+- `Kiwi::init()` for automatic bootstrap (local first, then cached download)
+- `Kiwi::new()` for env-based paths (`KIWI_LIBRARY_PATH`, `KIWI_MODEL_PATH`)
+- `Kiwi::from_config(...)` for explicit path control
+
+Useful environment variables:
+- `KIWI_RS_VERSION` (bootstrap target version, default `latest`)
+- `KIWI_RS_CACHE_DIR` (bootstrap cache root)
+- `KIWI_LIBRARY_PATH` (dynamic library path)
+- `KIWI_MODEL_PATH` (model directory path)
+
+Main capabilities:
+- Analyze/tokenize/sentence split/join/space/glue
+- Builder customization (user words, regex rules, dictionaries)
+- Typo APIs (`KiwiTypo`)
+- Constrained analysis (`MorphemeSet`, `Pretokenized`)
+- Batch APIs (`analyze_many*`, `tokenize_many*`)
+- UTF-16 APIs (check support at runtime)
+- CoNg semantics and subword tokenizer (`SwTokenizer`)
+
+Examples:
+- `examples/basic.rs`
+- `examples/analyze_options.rs`
+- `examples/builder_custom_words.rs`
+- `examples/typo_build.rs`
+- `examples/blocklist_and_pretokenized.rs`
+- `examples/split_sentences.rs`
+- `examples/utf16_api.rs`
+- `examples/native_batch.rs`
+- `examples/sw_tokenizer.rs`
+- `examples/morpheme_semantics.rs`
+
+Run examples:
+- `cargo run --example basic`
+- `cargo run --example analyze_options`
+- `cargo run --example builder_custom_words`
+- `cargo run --example typo_build`
+- `cargo run --example blocklist_and_pretokenized`
+- `cargo run --example split_sentences`
+- `cargo run --example utf16_api`
+- `cargo run --example native_batch`
+- `cargo run --example sw_tokenizer -- /path/to/tokenizer.json`
+- `cargo run --example morpheme_semantics`
+
+Notes for AI usage:
+- UTF-8 offsets are character indices, not byte offsets.
+- Check `supports_utf16_api()` before UTF-16 APIs.
+- Check `supports_analyze_mw()` before `analyze_many_utf16_via_native`.
+- kiwipiepy parity is partial; some Python/C++-specific surfaces remain unavailable.

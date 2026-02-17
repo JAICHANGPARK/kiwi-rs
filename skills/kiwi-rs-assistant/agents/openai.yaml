@@ -1,0 +1,7 @@
+interface:
+  display_name: "Kiwi-rs Assistant"
+  short_description: "Reliable kiwi-rs guidance for Rust NLP tasks"
+  default_prompt: "Use $kiwi-rs-assistant to write and validate runnable kiwi-rs code for my task."
+
+policy:
+  allow_implicit_invocation: true
