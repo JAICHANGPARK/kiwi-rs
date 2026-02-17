@@ -1,12 +1,12 @@
 # kiwipiepy parity status for kiwi-rs
 
-Snapshot date: 2026-02-16
+Snapshot date: 2026-02-17
 
-Baseline references:
+Validation baseline:
 
-- `ref/kiwipiepy-main/kiwipiepy/_wrap.py`
-- `ref/kiwipiepy-main/src/KiwiPy.cpp`
-- `ref/Kiwi-main/include/kiwi/capi.h`
+- `kiwipiepy==0.22.2` runtime API inspection (`dir(kiwipiepy.Kiwi)` and package symbols).
+- `kiwi-rs` source (`src/runtime.rs`, `src/types.rs`, `src/native.rs`) at `v0.1.4`.
+- C API loader table in `src/native.rs` (`KiwiApi` fields: `101`, `load_symbol*` calls: `101`).
 
 ## Legend
 
@@ -16,7 +16,7 @@ Baseline references:
 
 ## Progress by layer
 
-1. C API coverage: `complete` (`101/101` symbols in `capi.h` are loaded).
+1. C API coverage: `complete` (`101/101` loader entries in `src/native.rs`).
 2. High-level Rust API coverage: `strong` for core NLP workflows.
 3. Full `kiwipiepy` parity: `partial`.
 
@@ -27,8 +27,8 @@ Baseline references:
 | `Kiwi.add_user_word` | Partial | `KiwiBuilder::add_user_word` (builder-time API) |
 | `Kiwi.add_pre_analyzed_word` | Partial | `KiwiBuilder::add_pre_analyzed_word` (builder-time API) |
 | `Kiwi.load_user_dictionary` | Partial | `KiwiBuilder::load_user_dictionary` (builder-time API) |
-| `Kiwi.add_rule` | Equivalent | `KiwiBuilder::add_rule` |
-| `Kiwi.add_re_rule` | Partial | `KiwiBuilder::add_re_rule`; not Python `re.sub`-compatible in all edge cases |
+| `Kiwi.add_rule` | Partial | `KiwiBuilder::add_rule` (builder-time API) |
+| `Kiwi.add_re_rule` | Partial | `KiwiBuilder::add_re_rule` (builder-time API); not Python `re.sub`-compatible in all edge cases |
 | `Kiwi.add_re_word` | Partial | `Kiwi::add_re_word(pattern, tag)`; callback/user_value variant is not exposed |
 | `Kiwi.clear_re_words` | Equivalent | `Kiwi::clear_re_words` |
 | `Kiwi.analyze` | Partial | `Kiwi::analyze*`, `Kiwi::analyze_many_with_options`, `Kiwi::analyze_many_via_native` |
@@ -73,8 +73,8 @@ Baseline references:
 
 | kiwipiepy API | status | kiwi-rs API / note |
 |---|---|---|
-| `Kiwi.extract_words` | Equivalent | `KiwiBuilder::extract_words` |
-| `Kiwi.extract_add_words` | Equivalent | `KiwiBuilder::extract_add_words` |
+| `Kiwi.extract_words` | Partial | `KiwiBuilder::extract_words` (builder-time API) |
+| `Kiwi.extract_add_words` | Partial | `KiwiBuilder::extract_add_words` (builder-time API) |
 | `Kiwi.convert_hsdata` | Unavailable | C++ API utility, no C API endpoint |
 | `Kiwi.make_hsdataset` | Unavailable | C++ API utility, no C API endpoint |
 | `Kiwi.evaluate`, `Kiwi.predict_next` | Unavailable | not implemented in kiwipiepy runtime either (`NotImplementedError`) |
@@ -86,10 +86,11 @@ Baseline references:
 | `TypoTransformer`, `TypoDefinition` presets | Partial | `KiwiTypo` exists, but Python class shape/presets are different |
 | `HSDataset` | Unavailable | dataset class is Python/C++ layer |
 | `NgramExtractor` | Unavailable | no C API endpoint |
-| `KNLangModel` | Unavailable | no C API endpoint |
 | `Template` / `Kiwi.template` | Unavailable | Python template layer |
 | `utils.Stopwords` | Unavailable | not yet provided as Rust helper type |
 | `extract_substrings` | Unavailable | C++ layer utility |
+
+`KNLangModel` is not exposed by `kiwipiepy 0.22.2` at package level, so it is excluded from the current parity table.
 
 ## Why some gaps remain
 
