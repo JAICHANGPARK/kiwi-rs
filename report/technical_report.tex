@@ -40,8 +40,7 @@
 
 % Replace with final author metadata before submission.
 \author{
-Jai-Chang Park\\
-Google Developer Expert (GDE), Dart \& Flutter
+Jai-Chang Park\thanks{Google Developer Expert (GDE), Dart \& Flutter, Google Developer Groups (GDG) Golang Korea, Flutter Seoul}
 }
 \date{\today}
 
@@ -101,7 +100,7 @@ Table~\ref{tab:ko_analyzer_landscape} summarizes widely used Korean morphologica
 
 \begin{table*}[t]
 \centering
-\caption{Korean morphological analyzer landscape (engineering comparison, snapshot: 2026-02-17).}
+\caption{Korean morphological analyzer landscape (engineering comparison, snapshot: 2026-02-18).}
 \label{tab:ko_analyzer_landscape}
 \scriptsize
 \renewcommand{\arraystretch}{1.12}
@@ -293,7 +292,7 @@ For this work, three Kiwi properties are operationally important:
 Accordingly, \texttt{kiwi-rs} is designed as a C API-centered integration layer rather than a re-implementation of Kiwi internals. This design choice preserves upstream behavior while focusing engineering effort on safety, ergonomics, and deployment reproducibility.
 
 \section{Scope and Contributions}
-As of version \texttt{0.1.4} (snapshot date: 2026-02-17), the project reports complete loader coverage for the published Kiwi C symbols (\(101/101\)) and broad support for high-level workflows in Rust~\cite{kiwi_rs_repo,kiwi_rs_crates}. The crate targets Rust edition 2021 with MSRV 1.70, which supports older production toolchains while keeping modern language ergonomics~\cite{kiwi_rs_repo}. The main contributions are:
+As of version \texttt{0.1.4} (snapshot date: 2026-02-18), the project reports complete loader coverage for the published Kiwi C symbols (\(101/101\)) and broad support for high-level workflows in Rust~\cite{kiwi_rs_repo,kiwi_rs_crates}. The crate targets Rust edition 2021 with MSRV 1.70, which supports older production toolchains while keeping modern language ergonomics~\cite{kiwi_rs_repo}. The main contributions are:
 \begin{enumerate}[leftmargin=1.5em]
     \item \textbf{A production-oriented Rust surface over Kiwi C API.} The library exposes core and advanced capabilities, including batch APIs, typo models, pretokenization constraints, UTF-16 variants, and semantic CoNg operations (Kiwi context-graph similarity/prediction APIs).
     \item \textbf{A safety-first runtime model.} The implementation uses RAII cleanup (\texttt{Drop}), typed error propagation, runtime feature probing, and internal compatibility guards across object graphs.
@@ -308,6 +307,8 @@ As of version \texttt{0.1.4} (snapshot date: 2026-02-17), the project reports co
 
 \subsection{Ownership and Handle Safety}
 Core runtime objects (library, analyzer, builder, typo model, tokenizer, and intermediate result handles) are wrapped in Rust structs and released via deterministic \texttt{Drop} implementations. Internally shared runtime state uses \texttt{Arc}, while cross-object validity checks prevent accidental mixing of handles originating from different loaded libraries. This avoids a common FFI class of undefined behavior.
+
+Empirical evidence in this report is design-and-test oriented, not formal verification: the repository includes integration tests and a targeted callback-lifetime safety regression (\path{tests/safety_check.rs}), but a dedicated dynamic-analysis matrix (e.g., Valgrind/Memcheck or sanitizer-gated FFI boundary runs) is not yet part of the release protocol. We therefore scope the safety claim to type-level ownership constraints, deterministic cleanup, runtime handle-origin checks, and currently exercised tests.
 
 \subsection{Error Model}
 Public APIs return a typed \texttt{Result<T, KiwiError>} with distinct categories:
@@ -403,8 +404,11 @@ Cache & Capacity & Key Sketch \\
 \end{tabular}
 \end{table}
 
-Tokenize/analyze/split entries include a compact text fingerprint (length + edge bytes) and then verify full text equality for collision safety. This reduces average key-comparison cost while preserving correctness.
-Here, ``fingerprint'' denotes a fast pre-filter signature (length + boundary-byte sketch), not a collision-free identity hash; cache acceptance always requires full key equality checks.
+Tokenize/analyze/split entries include a compact text fingerprint and then verify full text equality for collision safety. In implementation terms, for text \(x\), the pre-filter is:
+\[
+F(x) = \left(|x|,\;H_8(x),\;T_8(x)\right),
+\]
+where \(H_8\) and \(T_8\) pack up to the first/last 8 bytes into \texttt{u64}. For \texttt{glue\_cache}, a composite \texttt{u64} is additionally mixed from per-chunk \(F(\cdot)\) values and newline flags. These fingerprints are only fast sketches; cache acceptance always requires full key equality (options + full text, or full chunk/newline structures), so collisions cannot alter semantic correctness.
 
 \subsection{Hot-Path Specialization}
 Several implementations reduce overhead beyond basic caching:
@@ -1037,18 +1041,65 @@ For production deployments, practical mitigation options are:
 \begin{itemize}[leftmargin=1.5em]
     \item warm process pools that amortize one-time initialization;
     \item explicit path pinning via \path{KIWI_LIBRARY_PATH} and \path{KIWI_MODEL_PATH} to reduce discovery variance;
-    \item explicit constructors (\texttt{Kiwi::new} or \texttt{Kiwi::from\_config}) when auto-bootstrap behavior is unnecessary.
+    \item explicit constructors (\texttt{Kiwi::new} or \texttt{Kiwi::from\_config}) when auto-bootstrap behavior is unnecessary;
+    \item a future ``fast-init'' mode that skips discovery/bootstrap by requiring fixed runtime paths at deploy time (targeting short-lived CLI/FaaS processes).
 \end{itemize}
 More aggressive options (e.g., static packaging or deeper loader specialization) may be constrained by upstream runtime distribution policy, ABI compatibility, and platform-specific linking requirements.
 
 \paragraph{Memory-footprint note.}
 The current benchmark harness is throughput/latency oriented and does not yet report peak RSS or allocator-level memory statistics. We therefore avoid quantitative memory claims in this report and treat memory comparison as an explicit follow-up task.
 
+\subsection{Build and Deployment Footprint}
+To quantify practical adoption cost, we measured three footprint components on the benchmark host: (i) crate package transfer size, (ii) release-binary delta for a minimal consumer application, and (iii) runtime library/model payload size.
+
+\begin{table}[t]
+\centering
+\caption{Package and binary-size measurements (\texttt{kiwi-rs} v0.1.4, macOS arm64 snapshot).}
+\label{tab:package_binary_footprint}
+\begin{tabular}{P{0.40\linewidth}rP{0.40\linewidth}}
+\toprule
+Item & Size (bytes) & Notes \\
+\midrule
+\texttt{kiwi-rs-0.1.4.crate} (\texttt{cargo package --offline}) & \num{371465} & \(\approx\)362.8 KiB compressed package archive \\
+Minimal release binary (baseline app) & \num{407232} & \texttt{println!} only \\
+Minimal release binary (+ \texttt{kiwi-rs}, \texttt{Kiwi::init()}) & \num{576608} & dependency linked, init path referenced \\
+\textbf{Binary delta (consumer app)} & \textbf{\num{169376}} & \textbf{\(+41.6\%\), \(\approx\)0.162 MiB} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering
+\caption{Runtime payload snapshot (resolved under \texttt{\$HOME/.local/kiwi}).}
+\label{tab:runtime_payload_footprint}
+\begin{tabular}{P{0.46\linewidth}rP{0.28\linewidth}}
+\toprule
+Runtime asset & Size (bytes) & Size (MiB) \\
+\midrule
+\texttt{lib/libkiwi.0.22.2.dylib} & \num{15411424} & 14.70 \\
+\texttt{models/cong/base/cong.mdl} & \num{75667563} & 72.16 \\
+\texttt{models/cong/base/sj.morph} & \num{8462892} & 8.07 \\
+\texttt{models/cong/base/default.dict} & \num{3090954} & 2.95 \\
+\texttt{models/cong/base/multi.dict} (optional) & \num{12064440} & 11.50 \\
+\midrule
+\textbf{Core runtime payload (without \texttt{multi.dict})} & \textbf{\num{102632833}} & \textbf{97.88} \\
+\textbf{Core runtime payload (+ \texttt{multi.dict})} & \textbf{\num{114697273}} & \textbf{109.38} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For a minimal consumer workflow that calls \texttt{Kiwi::init()}, incremental deployment footprint can be approximated as
+\[
+\Delta S_{\mathrm{deploy}} \approx \Delta S_{\mathrm{app\_bin}} + S_{\mathrm{runtime\_payload}},
+\]
+which yields approximately \(0.162\) MiB \(+\) \(97.88\!\sim\!109.38\) MiB on this snapshot, i.e., roughly \(98.0\!\sim\!109.5\) MiB additional footprint for practical runtime use. Bundling static archives or extra model assets increases this bound (full local installation on the measured host: about 194 MiB).
+
 \section{Discussion}
-The results suggest two key points:
+The results suggest three key points:
 \begin{enumerate}[leftmargin=1.5em]
     \item \textbf{Steady-state behavior is feature-dependent.} Several operations show strong relative gains, while some batch paths remain near parity.
     \item \textbf{Evaluation mode materially affects interpretation.} Warm-cache runs can overstate general speedups; dataset-varied runs are still cache-active; cache-minimized stress runs provide a stricter bound.
+    \item \textbf{Deployment size is runtime-asset dominated.} In our measurement, Rust consumer binary growth is modest (\(\approx 0.162\) MiB), while practical Kiwi runtime assets contribute roughly \(98\!\sim\!109\) MiB.
 \end{enumerate}
 
 For production systems, this implies a simple policy: report all three modes together (repeated-input, dataset-varied, cache-minimized stress) and use the cache-minimized mode to sanity-check whether large ratios are robust beyond cache/pipeline effects.
@@ -1071,14 +1122,16 @@ For production systems, this implies a simple policy: report all three modes tog
     \item \textbf{Thread-safety assumptions in upstream runtime.} Some test paths are intentionally serialized around initialization due to observed instability in concurrent setup/teardown.
     \item \textbf{Tier-dependent runtime immutability.} Tier B includes explicit binary/model hashes, but the Tier A baseline intentionally uses auto-discovery and is therefore less immutable across future upstream drift.
     \item \textbf{Qualitative ecosystem survey.} Wrapper/channel landscape is documented, but adoption telemetry (downloads, active dependents) is not yet normalized in this report.
+    \item \textbf{FFI boundary verification gap.} A full dynamic-analysis matrix is not yet part of the release gate. Planned evidence includes Valgrind or Memcheck runs, sanitizer-gated CI lanes, and scoped Miri checks where applicable.
 \end{itemize}
 
 \paragraph{Near-term roadmap.}
 \begin{enumerate}[leftmargin=1.5em]
-    \item \textbf{Startup optimization track.} Evaluate constructor-path policies for the \texttt{new} and \texttt{from\_config} initialization APIs, plus prewarmed workers and pinning defaults. Report median startup deltas on Tier A/Tier B.
+    \item \textbf{Startup optimization track.} Evaluate constructor-path policies for the \texttt{new} and \texttt{from\_config} initialization APIs, plus prewarmed workers and pinning defaults. Include an optional fast-init profile that disables bootstrap/discovery and report median startup deltas on Tier A/Tier B.
     \item \textbf{Memory profiling track.} Add peak RSS and allocation telemetry for repeated, dataset-varied, and cache-minimized modes; publish side-by-side Rust/Python summaries.
     \item \textbf{Cross-host reproducibility track.} Re-run the benchmark matrix on multiple OS/CPU profiles and publish variance envelopes for key features.
     \item \textbf{Parity and artifact hygiene track.} Continue parity-matrix updates, keep skill documentation release-coupled, and publish immutable runtime lock manifests (release tag + binary/model hashes).
+    \item \textbf{FFI safety verification track.} Add boundary-focused validation lanes (ASan/UBSan/LSan and Valgrind where supported) plus scoped Miri checks for non-FFI ownership invariants; publish crash-free stress logs and failure triage artifacts.
 \end{enumerate}
 
 \section{Reproducibility Checklist}
@@ -1378,6 +1431,53 @@ mkdir -p tmp/structural_parity
   --rust-jsonl tmp/structural_parity/kiwi_rs_outputs.jsonl \
   --md-out tmp/structural_parity/report.md \
   --json-out tmp/structural_parity/report.json
+\end{verbatim}
+
+\section{Build Footprint Command Template}
+\begin{verbatim}
+cd kiwi-rs
+
+# 1) Crate package size
+cargo package --allow-dirty --no-verify --offline
+stat -f "%N %z bytes" target/package/kiwi-rs-0.1.4.crate
+
+# 2) Consumer binary delta (baseline vs kiwi-rs)
+mkdir -p /tmp/size_base /tmp/size_with_kiwi
+
+cd /tmp/size_base
+cargo init --bin --name size_base --vcs none .
+cat > src/main.rs <<'EOF'
+fn main() { println!("size probe baseline"); }
+EOF
+cargo build --release --offline
+stat -f "%N %z bytes" target/release/size_base
+
+cd /tmp/size_with_kiwi
+cargo init --bin --name size_with_kiwi --vcs none .
+cat > Cargo.toml <<'EOF'
+[package]
+name = "size_with_kiwi"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+kiwi-rs = { path = "/path/to/kiwi-rs" }
+EOF
+cat > src/main.rs <<'EOF'
+use kiwi_rs::Kiwi;
+fn main() { let _ = Kiwi::init(); }
+EOF
+cargo build --release --offline
+stat -f "%N %z bytes" target/release/size_with_kiwi
+
+# 3) Runtime payload snapshot (example: local install)
+stat -f "%N %z" \
+  "$HOME/.local/kiwi/lib/libkiwi.0.22.2.dylib" \
+  "$HOME/.local/kiwi/models/cong/base/cong.mdl" \
+  "$HOME/.local/kiwi/models/cong/base/sj.morph" \
+  "$HOME/.local/kiwi/models/cong/base/default.dict" \
+  "$HOME/.local/kiwi/models/cong/base/multi.dict"
+du -sh "$HOME/.local/kiwi/lib" "$HOME/.local/kiwi/models" "$HOME/.local/kiwi"
 \end{verbatim}
 
 \end{document}
