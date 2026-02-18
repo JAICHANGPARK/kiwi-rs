@@ -13,6 +13,7 @@
 \usepackage{tikz}
 \usepackage{pgfplots}
 \usepackage{longtable}
+\usepackage{algpseudocode}
 \usepackage{hyperref}
 \usepackage{url}
 \usepackage{enumitem}
@@ -91,7 +92,8 @@ To position \texttt{kiwi-rs} in the broader Korean NLP landscape, we separate pr
 \end{itemize}
 
 \paragraph{Production ecosystem context.}
-For practical deployment choices, the current Korean morphology landscape includes open-source analyzers and hosted services: KoNLPy's multi-analyzer wrapper (\texttt{Hannanum}/\texttt{Kkma}/\texttt{Komoran}/\texttt{Mecab}/\texttt{Okt}), MeCab-ko lineage analyzers, Kakao's Khaiii, KOMORAN, Open Korean Text, Elasticsearch Nori integration, and hosted APIs such as Bareun/ETRI platforms~\cite{konlpy_docs,konlpy_tag_api,konlpy_paper,mecab_ko,khaiii_repo,komoran_repo,openkoreantext_repo,mecab2004crf,nori_ko,bareun_pypi,etri_aiopen_notice,etri_epretx,etri_epretx_api_list}. Table~\ref{tab:ko_analyzer_landscape} summarizes these options from an engineering perspective.
+For practical deployment choices, the current Korean morphology landscape includes open-source analyzers and hosted services.
+Representative options include KoNLPy's multi-analyzer wrapper (\texttt{Hannanum}/\texttt{Kkma}/\texttt{Komoran}/\texttt{Mecab}/\texttt{Okt}), MeCab-ko lineage analyzers, Kakao's Khaiii, KOMORAN, Open Korean Text, Elasticsearch Nori integration, and hosted APIs such as Bareun/ETRI platforms~\cite{konlpy_docs,konlpy_tag_api,konlpy_paper,mecab_ko,khaiii_repo,komoran_repo,openkoreantext_repo,mecab2004crf,nori_ko,bareun_pypi,etri_aiopen_notice,etri_epretx,etri_epretx_api_list}. Table~\ref{tab:ko_analyzer_landscape} summarizes these options from an engineering perspective.
 
 These two bodies of work are complementary to \texttt{kiwi-rs}: the academic line informs model-level context, while the ecosystem line clarifies real deployment alternatives.
 
@@ -112,7 +114,7 @@ Kiwi~\cite{kiwi_repo,kiwi_kjdh_2024,kiwi_releases} & C++ analyzer with statistic
 
 Khaiii~\cite{khaiii_repo} & Data-driven CNN-based Korean morphological analyzer & Open-source project repository & Native runtime and tooling documented in the upstream project & Upstream docs describe dictionary and patch workflows for practical correction loops \\
 
-KOMORAN~\cite{komoran_repo} & Java-based analyzer with dictionary/TRIE-centered design & Open-source Java library & Java API, plus ecosystem wrappers such as PyKOMORAN & JVM-native deployment; custom dictionary workflow emphasized in docs \\
+KOMORAN & Java-based analyzer with dictionary-centered design~\cite{komoran_repo} & Open-source Java library & Java API; ecosystem wrappers (e.g., PyKOMORAN) & JVM-native deployment; custom dictionary workflow emphasized \\
 
 Open Korean Text (Okt)~\cite{openkoreantext_repo,konlpy_tag_api} & Scala/Java Korean text processor & Open-source library & Scala/Java APIs; KoNLPy \texttt{Okt} wrapper & Supports normalization, tokenization, stemming, and phrase extraction for practical indexing workflows \\
 
@@ -133,17 +135,88 @@ ETRI EPRETX~\cite{etri_aiopen_notice,etri_epretx,etri_epretx_api_list} & Public 
 Kiwi is a Korean morphological analyzer implemented in C++ and distributed with a public C API, which makes it usable across multiple language runtimes~\cite{kiwi_repo}. \textbf{In modeling terms, Kiwi is not presented upstream as a Transformer architecture; it is described as statistical LM + skip-bigram based disambiguation}~\cite{kiwi_repo,kiwi_kjdh_2024}. In practice, Kiwi is commonly consumed through \texttt{kiwipiepy} in Python workflows, while additional ecosystem bindings target other environments~\cite{kiwipiepy,kiwi_repo}.
 
 \subsection{Modeling Basis Clarification (Not Transformer Architecture)}
-Because the Kiwi codebase contains identifiers such as \texttt{TypoTransformer} and \texttt{history\_transformer}, it is easy to misread the engine as Transformer-architecture NLP. Upstream documentation and the project citation, however, describe Kiwi's ambiguity resolution as a combination of a statistical language model and skip-bigram modeling~\cite{kiwi_repo,kiwi_kjdh_2024}. In this report, we therefore treat Kiwi as a statistical morphology analyzer with LM-based disambiguation, while Transformer-family papers are used only as adjacent related-work context.
+Because the Kiwi codebase contains identifiers such as \path{TypoTransformer}, it is easy to misread the engine as Transformer NLP. The same risk appears with names like \path{history_transformer}. Upstream documentation and the project citation, however, describe Kiwi's ambiguity resolution as statistical language-model plus skip-bigram disambiguation~\cite{kiwi_repo,kiwi_kjdh_2024}. In this report, we therefore treat Kiwi as a statistical morphology analyzer with LM-based disambiguation, while Transformer-family papers are used only as adjacent related-work context.
 
 \paragraph{Architectural Clarification: The \texttt{TypoTransformer} Component.}
 For the specific review concern ``\texttt{TypoTransformer} exists, so is Kiwi Transformer-based?'', our source audit indicates \textbf{no}:
 \begin{itemize}[leftmargin=1.5em]
     \item \texttt{TypoTransformer} is an error/typo generation-correction utility class (rule/cost based), not a neural encoder block.
     \item \texttt{history\_transformer} in KNLM code is a history-index remapping argument for n-gram construction, not self-attention computation.
-    \item Core LM implementation units are explicitly named \texttt{Knlm}, \texttt{CoNgramModel}, and \texttt{SkipBigramModel}, consistent with statistical LM design.
-    \item Build configuration in the upstream project does not introduce deep-learning runtime dependencies (e.g., PyTorch/TensorFlow/ONNX).
+    \item Core LM implementation units are explicitly named \texttt{Knlm} and \texttt{CoNgramModel}; skip-bigram behavior is represented by \texttt{SkipBigramModel}, consistent with statistical LM design.
+    \item Build configuration in the upstream project does not introduce deep-learning runtime dependencies.
 \end{itemize}
 Accordingly, we avoid claiming that Kiwi itself is a Transformer neural architecture and keep the terminology separation explicit throughout this report.
+
+\subsection{Kiwi Architecture (Conceptual View)}
+Figure~\ref{fig:kiwi_architecture} summarizes a conceptual inference flow for Kiwi based on upstream descriptions (statistical LM + skip-bigram), public C API boundaries, and source-level module naming~\cite{kiwi_repo,kiwi_kjdh_2024}. This is an explanatory architecture map, not a line-by-line reconstruction of private internal call graphs.
+
+\begin{figure}[t]
+\centering
+\resizebox{\linewidth}{!}{%
+\begin{tikzpicture}[
+    box/.style={
+        draw,
+        rounded corners=2pt,
+        align=center,
+        font=\scriptsize,
+        minimum height=9mm,
+        text width=2.7cm,
+        fill=blue!6
+    },
+    edge/.style={-Latex, thick},
+    control/.style={-Latex, thick, dashed},
+    node distance=5mm and 6mm
+]
+\node[box, fill=green!10] (input) {Input Text};
+\node[box, right=of input, text width=3.0cm] (candidate) {Candidate Generation\\dictionary + user lexicon\\pre-analyzed entries};
+\node[box, right=of candidate, text width=3.0cm] (lattice) {Morpheme Lattice\\candidate paths};
+\node[box, right=of lattice, text width=3.0cm, fill=orange!12] (scoring) {Statistical Scoring\\\texttt{Knlm} + \texttt{SkipBigramModel}};
+\node[box, right=of scoring, text width=2.9cm, fill=green!10] (decode) {Path Decoding\\best analysis output};
+\node[box, below=of scoring, text width=3.0cm, fill=yellow!15] (typo) {Typo Handling\\\texttt{TypoTransformer}\\rule/cost channel};
+\node[box, below=of decode, text width=2.9cm, fill=purple!10] (api) {C API Output\\tokens + POS + offsets};
+
+\draw[edge] (input) -- (candidate);
+\draw[edge] (candidate) -- (lattice);
+\draw[edge] (lattice) -- (scoring);
+\draw[edge] (scoring) -- (decode);
+\draw[edge] (decode) -- (api);
+\draw[control] (typo) -- (candidate);
+\draw[control] (typo) -- (scoring);
+\end{tikzpicture}
+}
+\caption{Conceptual Kiwi architecture (upstream-aligned abstraction). Solid arrows: primary inference flow; dashed arrows: typo-control influence.}
+\label{fig:kiwi_architecture}
+\end{figure}
+
+\subsection{Technologies Used by Kiwi}
+From an implementation and modeling perspective, Kiwi combines several practical technologies~\cite{kiwi_repo,kiwi_kjdh_2024}:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{C++ native runtime + C API surface:} core analyzer logic is implemented natively and exported through a stable C boundary (\texttt{include/kiwi/capi.h}).
+    \item \textbf{Statistical language-model scoring:} ambiguity resolution is framed as sequence scoring over morphological candidates (\texttt{Knlm} family).
+    \item \textbf{Skip-bigram interaction modeling:} non-local morpheme interaction features are included through dedicated skip-bigram model components.
+    \item \textbf{Typo-processing utilities:} typo generation/correction utilities (e.g., \texttt{TypoTransformer}) provide error-handling support without implying Transformer self-attention architecture.
+    \item \textbf{Release-packaged deployment artifacts:} prebuilt binaries and model assets are distributed for major operating systems, enabling multi-language bindings and production integration.
+\end{itemize}
+
+\subsection{Conceptual Scoring Formulation}
+To make the statistical basis explicit, we use the following \emph{conceptual} decomposition for analysis \(y=(m_1,\dots,m_T)\) of input text \(x\):
+\[
+\operatorname{Score}(y \mid x)
+=
+\lambda_{\mathrm{lm}} \sum_{t=1}^{T} \log P_{\mathrm{KNLM}}(m_t \mid h_t)
++ \lambda_{\mathrm{sb}} \sum_{t=2}^{T} s_{\mathrm{SB}}(m_{\pi(t)}, m_t)
+- \lambda_{\mathrm{ty}} C_{\mathrm{typo}}(x, y)
++ \lambda_{\mathrm{lex}} B_{\mathrm{lex}}(y).
+\]
+The selected output is then
+\[
+\hat{y}=\arg\max_{y \in \mathcal{Y}(x)} \operatorname{Score}(y \mid x),
+\]
+where \(\mathcal{Y}(x)\) is the candidate set induced by dictionary entries, user lexicon additions, and analyzer constraints.
+
+In this formulation, \(h_t\) denotes the KNLM history state at position \(t\), \(\pi(t)\) denotes a linked predecessor index (adjacent bigram is the special case \(\pi(t)=t-1\)), \(s_{\mathrm{SB}}(\cdot,\cdot)\) is a skip-bigram interaction score, \(C_{\mathrm{typo}}(x,y)\) is a typo-related penalty term, and \(B_{\mathrm{lex}}(y)\) is a lexicon/user-dictionary bonus. Coefficients \(\lambda_{\mathrm{lm}}, \lambda_{\mathrm{sb}}, \lambda_{\mathrm{ty}}, \lambda_{\mathrm{lex}}\) are non-negative mixture weights.
+
+\noindent\textit{Note.} This equation is intentionally explanatory: it reflects the reported statistical-LM + skip-bigram design direction and clarifies interaction structure, while exact feature templates, predecessor linking policy, and learned/fixed weights remain implementation-specific in upstream Kiwi.
 
 \subsection{Ecosystem and Distribution Survey}
 Upstream Kiwi documentation describes a broad multi-language ecosystem centered on the C API and release-packaged binaries~\cite{kiwi_repo,kiwi_releases,kiwi_gui}. Table~\ref{tab:kiwi_ecosystem} summarizes the currently documented channels and wrappers relevant to market and adoption analysis.
@@ -152,7 +225,7 @@ Upstream Kiwi documentation describes a broad multi-language ecosystem centered 
 \centering
 \caption{Documented Kiwi ecosystem channels and wrappers (upstream snapshot).}
 \label{tab:kiwi_ecosystem}
-\begin{tabular}{p{0.30\linewidth}p{0.60\linewidth}}
+\begin{tabular}{P{0.30\linewidth}P{0.60\linewidth}}
 \toprule
 Channel & Notes \\
 \midrule
@@ -300,6 +373,15 @@ Figure~\ref{fig:architecture} summarizes the practical layering used by the libr
 \section{Performance Mechanisms}
 This section explains \emph{why} the reported throughput numbers can become large on specific features.
 
+\subsection{Terminology: Cache and Warm Paths}
+We use the following terms consistently in this report:
+\begin{itemize}[leftmargin=1.5em]
+    \item \textbf{Cold path:} execution on a cache miss, including full request preparation and native runtime computation.
+    \item \textbf{Warm path:} execution state where reusable artifacts (cache entries, prepared join structures, pair decisions) reduce repeated work.
+    \item \textbf{Cache-active varied input:} varied-input runs with a finite dataset pool; partial cache reuse can still occur.
+    \item \textbf{Cache-minimized stress:} varied-input runs with a large variant pool to suppress accidental reuse and approximate lower cache benefit.
+\end{itemize}
+
 \subsection{Recency Caches and Key Design}
 \texttt{kiwi-rs} uses bounded recency caches on multiple paths. Cache hits are promoted and old entries are evicted from bounded queues, yielding an LRU-like policy with small fixed capacities.
 
@@ -322,6 +404,7 @@ Cache & Capacity & Key Sketch \\
 \end{table}
 
 Tokenize/analyze/split entries include a compact text fingerprint (length + edge bytes) and then verify full text equality for collision safety. This reduces average key-comparison cost while preserving correctness.
+Here, ``fingerprint'' denotes a fast pre-filter signature (length + boundary-byte sketch), not a collision-free identity hash; cache acceptance always requires full key equality checks.
 
 \subsection{Hot-Path Specialization}
 Several implementations reduce overhead beyond basic caching:
@@ -338,6 +421,28 @@ To prevent stale inference outputs after runtime mutation, option/config updates
 \subsection{Implications for Repeated vs Varied Benchmarks}
 The large repeated-input speedups are expected from recency caches and prepared-join reuse. For varied-input runs, cache effects can still appear when the active text pool fits cache capacity (e.g., a 192-text pool versus 256-entry tokenize cache). Therefore, very large ratios on some features should be interpreted as \emph{pipeline-aware upper bounds under this harness design}, not universal constants.
 
+\subsection{Analytical Cache Model}
+To formalize mode sensitivity, let \(C_f\) be cache capacity for feature \(f\), and let \(|U_f^{(m)}|\) be the number of distinct keys observed under mode \(m \in \{r,v\}\) (repeated/varied). Under a uniform-reuse approximation:
+\[
+h_f^{(m)} \approx \min\!\left(1,\frac{C_f}{|U_f^{(m)}|}\right),
+\]
+where \(h_f^{(m)}\) is the cache-hit probability.
+
+With hit latency \(\tau_{f,\mathrm{hit}}\), miss latency \(\tau_{f,\mathrm{miss}}\), and \(\kappa_f=\tau_{f,\mathrm{miss}}/\tau_{f,\mathrm{hit}} \ge 1\), expected Rust-side latency is:
+\[
+\tau_{f,R}^{(m)} = h_f^{(m)}\tau_{f,\mathrm{hit}} + \left(1-h_f^{(m)}\right)\tau_{f,\mathrm{miss}}
+= \tau_{f,\mathrm{miss}}\!\left[\left(1-h_f^{(m)}\right)+\frac{h_f^{(m)}}{\kappa_f}\right].
+\]
+If the Python-side mode shift is relatively small for the same text pool, the repeated-vs-varied amplification can be approximated by:
+\[
+A_f^{\mathrm{model}} \approx
+\frac{\left(1-h_f^{(v)}\right)+h_f^{(v)}/\kappa_f}
+{\left(1-h_f^{(r)}\right)+h_f^{(r)}/\kappa_f}.
+\]
+This model explains why \(A_f^{\mathrm{model}}\) grows when repeated-mode key diversity shrinks (\(|U_f^{(r)}| \ll |U_f^{(v)}|\)) and hit/miss latency contrast is large (\(\kappa_f \gg 1\)).
+
+Observation scope: \(C_f\) values are directly observable from implementation constants (Table~\ref{tab:cache_design}), and \(|U_f^{(m)}|\) can be measured from benchmark key streams. In this report, however, we do not instrument per-feature cache-hit counters or direct hit/miss latency probes; therefore \(h_f^{(m)}\), \(\kappa_f\), and \(A_f^{\mathrm{model}}\) are explanatory latent quantities rather than directly estimated parameters.
+
 \section{API Coverage and Parity Boundaries}
 \texttt{kiwi-rs} covers most C API-backed flows and exposes them with Rust-first signatures. Table~\ref{tab:api_surface} summarizes the currently supported API surface by subsystem.
 
@@ -345,7 +450,7 @@ The large repeated-input speedups are expected from recency caches and prepared-
 \centering
 \caption{Supported API surface in \texttt{kiwi-rs} (representative groups).}
 \label{tab:api_surface}
-\begin{tabular}{p{0.30\linewidth}p{0.58\linewidth}}
+\begin{tabular}{P{0.30\linewidth}P{0.58\linewidth}}
 \toprule
 Area & Representative APIs \\
 \midrule
@@ -372,6 +477,9 @@ To reduce prompt ambiguity in AI-assisted development, \texttt{kiwi-rs} includes
 
 This skill packaging is not presented as a model-quality contribution; instead, it is a reproducible developer-facing artifact that can improve consistency of generated integration code.
 
+\paragraph{Maintenance model.}
+The skill package is currently maintained as version-controlled static artifacts (\texttt{SKILL.md}, references, and agent config YAML) in the same repository. Updates are release-coupled: when APIs or parity boundaries change, the skill text is revised in the same review cycle to keep prompt guidance aligned with the shipped crate surface.
+
 \section{Evaluation Methodology}
 \subsection{Benchmark Design}
 The benchmark protocol compares \texttt{kiwi-rs} and \texttt{kiwipiepy} under aligned settings:
@@ -382,6 +490,32 @@ The benchmark protocol compares \texttt{kiwi-rs} and \texttt{kiwipiepy} under al
     \item sink parity checks to validate workload equivalence;
     \item bootstrap confidence intervals (95\%) and \(P(\text{ratio}>1)\).
 \end{itemize}
+
+\subsection{Statistical Definitions}
+For a feature \(f\), engine \(e \in \{R,P\}\) (Rust/Python), and repeat index \(i \in \{1,\dots,n\}\), let \(x_{f,e,i}\) denote the measured calls-per-second. We define the per-engine summary as the median over repeats:
+\[
+\tilde{x}_{f,e} = \operatorname{median}_{i}(x_{f,e,i}).
+\]
+The reported throughput ratio is:
+\[
+\hat{\rho}_f = \frac{\tilde{x}_{f,R}}{\tilde{x}_{f,P}}.
+\]
+Bootstrap ratios are computed with \(B\) resamples (\(B=2000\) in this report). For each bootstrap replicate \(b\):
+\[
+\rho_f^{*(b)} = \frac{\tilde{x}_{f,R}^{*(b)}}{\tilde{x}_{f,P}^{*(b)}},
+\]
+and we denote the bootstrap ratio sample by
+\[
+\rho_f^{*}=\{\rho_f^{*(1)},\rho_f^{*(2)},\dots,\rho_f^{*(B)}\}.
+\]
+and the 95\% confidence interval is the percentile interval:
+\[
+[L_f,U_f] = [Q_{0.025}(\rho_f^{*}),\,Q_{0.975}(\rho_f^{*})].
+\]
+We also report the posterior-like bootstrap probability:
+\[
+\hat{p}_f = \frac{1}{B}\sum_{b=1}^{B}\mathbf{1}\!\left[\rho_f^{*(b)} > 1\right].
+\]
 
 Decision thresholds follow a practical equivalence band of \(\pm 5\%\) around parity. For ratio CI \([L, U]\):
 \begin{itemize}[leftmargin=1.5em]
@@ -628,7 +762,7 @@ Feature & Ratio & 95\% CI & Decision \\
 \end{tabular}
 \end{table}
 
-Startup medians also shift under pinning: unpinned varied-input run shows \(1326.721\) ms (\texttt{kiwi-rs}) vs \(622.918\) ms (\texttt{kiwipiepy}), while path-pinned varied-input run shows \(1461.594\) ms vs \(764.915\) ms (both \(n=5\)). This reinforces that startup comparisons should be interpreted with explicit runtime-path metadata rather than as universal constants.
+Startup medians also shift under pinning. The unpinned varied-input run shows \(1326.721\) ms (\texttt{kiwi-rs}) vs \(622.918\) ms (\texttt{kiwipiepy}); the path-pinned varied-input run shows \(1461.594\) ms vs \(764.915\) ms (both \(n=5\)). This reinforces that startup comparisons should be interpreted with explicit runtime-path metadata rather than as universal constants.
 
 \subsection{Cross-Engine Structural Agreement}
 Table~\ref{tab:agreement_core} summarizes structural agreement between \texttt{kiwi-rs} and \texttt{kiwipiepy} on \path{swe_textset_v2.tsv}. Agreement is high overall. Token-boundary F1 is \(1.0000\), token (span+form+tag) F1 is \(0.9990\), and POS agreement on shared spans is \(99.90\%\).
@@ -764,6 +898,12 @@ These category runs should be interpreted as a complementary robustness signal r
 \subsection{Repeated vs Varied Snapshot (All Common Features)}
 To provide full cross-mode visibility, Table~\ref{tab:full_snapshot} reports all 15 common benchmark features shared by both engines. This table includes repeated-input and varied-input ratios, plus \(\Delta\%\) relative to parity (\(1.0\times\)).
 
+For each feature, we define the empirical cache/warm-path amplification factor:
+\[
+A_f^{\mathrm{emp}} = \frac{\hat{\rho}_f^{\text{repeated}}}{\hat{\rho}_f^{\text{varied}}}.
+\]
+Values \(A_f^{\mathrm{emp}} \gg 1\) indicate strong repeated-mode amplification relative to the varied profile.
+
 \begin{table}[t]
 \centering
 \caption{Full repeated-vs-varied ratio snapshot (\texttt{kiwi-rs} / \texttt{kiwipiepy}) for all common features.}
@@ -880,7 +1020,7 @@ Initialization latency is sensitive to pinning profile and initialization mode. 
 \centering
 \caption{Startup latency summary (\texttt{init\_ms}, lower is better).}
 \label{tab:startup_profiles}
-\begin{tabular}{p{0.34\linewidth}p{0.27\linewidth}p{0.27\linewidth}}
+\begin{tabular}{P{0.34\linewidth}P{0.27\linewidth}P{0.27\linewidth}}
 \toprule
 Profile & \texttt{kiwi-rs} & \texttt{kiwipiepy} \\
 \midrule
@@ -891,6 +1031,18 @@ Tier B path-pinned, dataset-varied (\(n=5\)) & \(1461.594\) ms [Q1 \(1442.657\),
 \end{table}
 
 For Tier A, bootstrap median CIs are \([1278.838, 1474.234]\) ms (\texttt{kiwi-rs}) and \([617.882, 655.605]\) ms (\texttt{kiwipiepy}). We also probed Rust init paths with a lightweight startup-only workload (\(n=5\)): \texttt{Kiwi::init()} median \(1294.165\) ms vs \texttt{Kiwi::new()} median \(1304.267\) ms (no consistent reduction in this setup). Overall, startup is dominated by runtime discovery/loading behavior and should be interpreted with explicit path metadata.
+
+\paragraph{Startup mitigation options.}
+For production deployments, practical mitigation options are:
+\begin{itemize}[leftmargin=1.5em]
+    \item warm process pools that amortize one-time initialization;
+    \item explicit path pinning via \path{KIWI_LIBRARY_PATH} and \path{KIWI_MODEL_PATH} to reduce discovery variance;
+    \item explicit constructors (\texttt{Kiwi::new} or \texttt{Kiwi::from\_config}) when auto-bootstrap behavior is unnecessary.
+\end{itemize}
+More aggressive options (e.g., static packaging or deeper loader specialization) may be constrained by upstream runtime distribution policy, ABI compatibility, and platform-specific linking requirements.
+
+\paragraph{Memory-footprint note.}
+The current benchmark harness is throughput/latency oriented and does not yet report peak RSS or allocator-level memory statistics. We therefore avoid quantitative memory claims in this report and treat memory comparison as an explicit follow-up task.
 
 \section{Discussion}
 The results suggest two key points:
@@ -905,8 +1057,8 @@ For production systems, this implies a simple policy: report all three modes tog
 \begin{itemize}[leftmargin=1.5em]
     \item \textbf{Single host profile.} Results were collected on one machine and one OS; cross-hardware variance is not yet quantified.
     \item \textbf{Version snapshot effects.} Results depend on specific versions of Kiwi, \texttt{kiwi-rs}, \texttt{kiwipiepy}, Rust, and Python.
-    \item \textbf{Cross-engine binary identity boundary.} Even with explicit model-path pinning, \texttt{kiwipiepy}'s packaged native extension limits strict binary-level identity with Rust-side dynamic loading.
-    \item \textbf{Cache interactions.} Even varied-input configurations may retain partial repetition, especially in category-constrained pools.
+    \item \textbf{Cross-engine binary identity boundary.} Even with explicit model-path pinning, the packaged native extension in kiwipiepy limits strict binary-level identity with Rust-side dynamic loading paths.
+    \item \textbf{Cache interactions.} Varied-input configurations may still retain partial repetition in constrained category pools.
     \item \textbf{Process-level overhead differences.} Language runtime overheads and bridge paths differ between Rust and Python and can affect per-feature behavior.
     \item \textbf{No corpus-level linguistic metric in this report.} We report wrapper parity/behavior and throughput, not task-level morphological accuracy deltas versus upstream Kiwi.
 \end{itemize}
@@ -921,7 +1073,13 @@ For production systems, this implies a simple policy: report all three modes tog
     \item \textbf{Qualitative ecosystem survey.} Wrapper/channel landscape is documented, but adoption telemetry (downloads, active dependents) is not yet normalized in this report.
 \end{itemize}
 
-Planned work includes broader hardware validation, additional memory profiling, startup optimization, immutable runtime lock manifests (release tag + binary/model hashes), and clearly separated optional modules for non-C-API parity features.
+\paragraph{Near-term roadmap.}
+\begin{enumerate}[leftmargin=1.5em]
+    \item \textbf{Startup optimization track.} Evaluate constructor-path policies for the \texttt{new} and \texttt{from\_config} initialization APIs, plus prewarmed workers and pinning defaults. Report median startup deltas on Tier A/Tier B.
+    \item \textbf{Memory profiling track.} Add peak RSS and allocation telemetry for repeated, dataset-varied, and cache-minimized modes; publish side-by-side Rust/Python summaries.
+    \item \textbf{Cross-host reproducibility track.} Re-run the benchmark matrix on multiple OS/CPU profiles and publish variance envelopes for key features.
+    \item \textbf{Parity and artifact hygiene track.} Continue parity-matrix updates, keep skill documentation release-coupled, and publish immutable runtime lock manifests (release tag + binary/model hashes).
+\end{enumerate}
 
 \section{Reproducibility Checklist}
 For external review, the following should be published with any claim:
@@ -938,7 +1096,9 @@ For external review, the following should be published with any claim:
 The repository already includes scripts and generated artifacts for this checklist under \path{tmp/feature_dataset_matrix_v2_varied_r5_i300} and related directories.
 
 \section{Conclusion}
-\texttt{kiwi-rs} shows that a Rust-first binding over the Kiwi C API can provide practical ergonomics and explicit safety boundaries. The benchmark evidence supports substantial gains for selected features while also highlighting near-parity regions and startup trade-offs. Overall, the library is a practical option for Rust-native Korean NLP services when paired with transparent, workload-aware evaluation.
+\texttt{kiwi-rs} demonstrates that a Rust-first integration layer over the Kiwi C API can provide stronger safety and deployment ergonomics than thin bindings while preserving practical performance. The report contributes three concrete artifacts: (i) a capability-aware and ownership-safe runtime wrapper, (ii) a transparent multi-profile benchmark protocol (repeated, cache-active varied, cache-minimized), and (iii) reproducibility-oriented evaluation assets including parity checks, command templates, and appendix algorithms.
+
+Results support strong speedups on selected paths and near-parity or inconclusive outcomes on others, which reinforces a central claim of this work: binding-layer performance must be interpreted by workload mode, not a single headline ratio. Startup overhead and missing memory telemetry remain open operational concerns. With the roadmap outlined in Section~11, \texttt{kiwi-rs} is positioned as a robust engineering baseline for Rust-native Korean NLP services and reproducible systems research.
 
 \section*{Artifact and License Notes}
 \texttt{kiwi-rs} is released under LGPL-2.1-or-later. This manuscript reports software benchmark data; it does not contain user-identifying or sensitive human-subject data.
@@ -1023,6 +1183,105 @@ User-defined & \texttt{USER0}--\texttt{USER4} & custom user tag slots & Kiwi ext
 
 \noindent
 \textit{Note.} ``Kiwi extension'' marks tags that are not in the baseline Sejong tag set.
+
+\section{Benchmark and Test Pseudocode}
+This appendix summarizes benchmark/test logic in implementation-agnostic pseudocode for reviewability.
+
+\begin{figure}[t]
+\centering
+\caption{Algorithm 1: Benchmark Compare Loop (Rust vs Python)}
+\label{alg:bench_compare}
+\begin{algorithmic}[1]
+\State \textbf{Input:} dataset \(D\), feature set \(F\), repeats \(n\), warmup \(w\), iterations \(t\)
+\ForAll{feature \(f \in F\)}
+  \For{run \(=1\) to \(n\)}
+    \ForAll{engine in alternating\_order(\{rust, python\})}
+      \State warmup(engine, \(f\), \(D\), \(w\))
+      \State \(m \gets\) measure\_calls\_per\_sec(engine, \(f\), \(D\), \(t\))
+      \State \(s \gets\) sink\_value(engine, \(f\), \(D\))
+      \State store(engine, \(f\), run, \(m\), \(s\))
+    \EndFor
+  \EndFor
+  \State \(\rho_f \gets \mathrm{median}(M_{rust,f}) / \mathrm{median}(M_{python,f})\)
+  \State run sink-parity guardrail for \(f\)
+  \State compute bootstrap CI and \(P(\rho_f>1)\)
+\EndFor
+\State \textbf{Output:} per-feature metrics, ratios, CI, decisions
+\end{algorithmic}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\caption{Algorithm 2: Sink-Parity Guardrail}
+\label{alg:sink_parity}
+\begin{algorithmic}[1]
+\State \textbf{Input:} sink\(_{rust}\), sink\(_{python}\), threshold \(\epsilon\)
+\If{sink\(_{python}=0\)}
+  \State \(e \gets |sink_{rust} - sink_{python}|\)
+\Else
+  \State \(e \gets |sink_{rust} - sink_{python}| / |sink_{python}|\)
+\EndIf
+\If{\(e > \epsilon\)}
+  \State mark feature as non-equivalent; fail strict mode
+\EndIf
+\end{algorithmic}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\caption{Algorithm 3: Bootstrap Ratio Confidence Interval}
+\label{alg:bootstrap_ratio}
+\begin{algorithmic}[1]
+\State \textbf{Input:} run vectors \(R\), \(P\); bootstrap samples \(B\)
+\For{\(b=1\) to \(B\)}
+  \State \(R_b \gets\) resample\_with\_replacement(\(R\))
+  \State \(P_b \gets\) resample\_with\_replacement(\(P\))
+  \State \(\rho_b^* \gets \mathrm{median}(R_b) / \mathrm{median}(P_b)\)
+\EndFor
+\State \(CI_{95} \gets [Q_{0.025}(\rho^*), Q_{0.975}(\rho^*)]\)
+\State \(p \gets \mathrm{mean}(\mathbf{1}[\rho^*>1])\)
+\State \textbf{return} \(CI_{95}, p\)
+\end{algorithmic}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\caption{Algorithm 4: Structural Agreement (Cross-Engine)}
+\label{alg:struct_agreement}
+\begin{algorithmic}[1]
+\State \textbf{Input:} per-row Rust outputs \(U_r\), Python outputs \(U_p\)
+\ForAll{row \(i\)}
+  \State normalize sentence boundaries to character offsets
+  \State compare exact token sequence (form, tag, start, end)
+  \State compare token-boundary sets (precision/recall/F1)
+  \State compare token sets (span+form+tag precision/recall/F1)
+  \State compute POS agreement on shared spans
+\EndFor
+\State aggregate corpus-level rates and confusion pairs
+\end{algorithmic}
+\end{figure}
+
+\section{Implementation Mapping and Traceability}
+\begin{table}[t]
+\centering
+\caption{Pseudocode-to-implementation mapping in this repository.}
+\label{tab:pseudocode_mapping}
+\begin{tabular}{P{0.31\linewidth}P{0.24\linewidth}P{0.37\linewidth}}
+\toprule
+Pseudocode item & Primary implementation path & Role \\
+\midrule
+Algorithm 1 & \path{scripts/compare_feature_bench.py} & Main benchmark orchestration, ratio/decision reporting, artifact export \\
+Algorithm 2 & \path{scripts/compare_feature_bench.py} & Sink-parity calculation, strict/non-strict guardrails \\
+Algorithm 3 & \path{scripts/compare_feature_bench.py} & Bootstrap resampling, percentile CI, \(P(\text{ratio}>1)\) \\
+Algorithm 4 & \path{scripts/compare_structural_parity.py}, \path{examples/dump_structural_outputs.rs} & Cross-engine structural agreement and confusion extraction \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For traceability, lock all appendix command outputs to the submission Git SHA reported by:
+\begin{verbatim}
+git rev-parse HEAD
+\end{verbatim}
 
 \section{Benchmark Command Template}
 \begin{verbatim}
