@@ -2355,6 +2355,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
+            typo_transformer: ptr::null_mut(),
+            typo_threshold: 2.5,
         };
 
         clear_kiwi_error(&self.inner.api);
@@ -2493,6 +2495,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
+            typo_transformer: ptr::null_mut(),
+            typo_threshold: 2.5,
         };
 
         clear_kiwi_error(&self.inner.api);
@@ -2816,6 +2820,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
+            typo_transformer: ptr::null_mut(),
+            typo_threshold: 2.5,
         };
 
         clear_kiwi_error(&self.inner.api);
@@ -2887,6 +2893,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
+            typo_transformer: ptr::null_mut(),
+            typo_threshold: 2.5,
         };
 
         clear_kiwi_error(&self.inner.api);
@@ -3006,6 +3014,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
+            typo_transformer: ptr::null_mut(),
+            typo_threshold: 2.5,
         };
 
         clear_kiwi_error(&self.inner.api);
@@ -3294,6 +3304,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
+            typo_transformer: ptr::null_mut(),
+            typo_threshold: 2.5,
         };
 
         clear_kiwi_error(&self.inner.api);
