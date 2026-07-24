@@ -293,7 +293,7 @@ fn pick_text<'a>(mode: InputMode, fallback: &'a str, pool: &'a [String], index: 
 }
 
 fn round_batch_pool_size(value: usize, batch_size: usize) -> usize {
-    let chunks = value.div_ceil(batch_size);
+    let chunks = (value + batch_size - 1) / batch_size;
     chunks * batch_size
 }
 

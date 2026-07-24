@@ -1,6 +1,6 @@
 [package]
 name = "kiwi-rs"
-version = "0.1.4"
+version = "2026.7.24"
 edition = "2021"
 rust-version = "1.70"
 license = "LGPL-2.1-or-later"

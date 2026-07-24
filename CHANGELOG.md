@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.7.24] - 2026-07-24
+
+### Fixed
+- Fixed null-termination in `rule_replacer_callback` FFI boundary to prevent memory buffer overflow during rule additions.
+- Resolved Clippy warnings (`vec_box`) and MSRV 1.70 compatibility issue in `examples/bench_features.rs`.
+
 ## [0.1.4] - 2026-02-17
 
 ### Changed

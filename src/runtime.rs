@@ -267,6 +267,7 @@ pub struct KiwiBuilder {
     num_threads: i32,
     build_options: i32,
     typo_cost_threshold: f32,
+    #[allow(clippy::vec_box)]
     rule_contexts: Vec<Box<RuleCallbackContext>>,
 }
 
@@ -1586,7 +1587,7 @@ pub struct Kiwi {
     glue_cache: RefCell<VecDeque<GlueCacheEntry>>,
     glue_pair_cache: RefCell<VecDeque<GluePairScoreCacheEntry>>,
     tag_name_cache: Arc<Vec<Option<String>>>,
-    #[allow(dead_code)]
+    #[allow(dead_code, clippy::vec_box)]
     rule_contexts: Vec<Box<RuleCallbackContext>>,
 }
 
@@ -4837,12 +4838,12 @@ unsafe extern "C" fn rule_replacer_callback(
     let replaced = (context.replacer)(&input_text);
     let replaced_bytes = replaced.as_bytes();
 
-    if replaced_bytes.len() > c_int::MAX as usize {
+    if replaced_bytes.len() > c_int::MAX as usize - 1 {
         return -1;
     }
 
     if output.is_null() {
-        return replaced_bytes.len() as c_int;
+        return (replaced_bytes.len() + 1) as c_int;
     }
 
     ptr::copy_nonoverlapping(
@@ -4850,6 +4851,7 @@ unsafe extern "C" fn rule_replacer_callback(
         output as *mut u8,
         replaced_bytes.len(),
     );
+    *output.add(replaced_bytes.len()) = 0;
     replaced_bytes.len() as c_int
 }
 
