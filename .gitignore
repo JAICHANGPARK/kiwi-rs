@@ -21,4 +21,5 @@ tmp/
 
 # Python cache artifacts
 __pycache__/
-*.pyc
+# OS metadata
+.DS_Store
