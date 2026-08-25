@@ -20,6 +20,16 @@ fn test_all_sequential() {
     run_space();
     run_join();
     run_add_user_word();
+    run_global_config();
+}
+
+fn run_global_config() {
+    println!("Starting run_global_config");
+    let mut kiwi = get_kiwi();
+    let config = kiwi.global_config().expect("Failed to get global config");
+    println!("Global config: {:?}", config);
+    kiwi.set_global_config(config)
+        .expect("Failed to set global config");
 }
 
 // ... (existing functions)

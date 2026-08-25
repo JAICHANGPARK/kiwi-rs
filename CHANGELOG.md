@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.8.25] - 2026-08-25
+
+### Fixed
+- Fixed ABI mismatch with Kiwi >= 0.23.0 in `KiwiAnalyzeOption` by adding `typo_transformer` and `typo_threshold` fields, resolving segmentation faults during `analyze()` / `tokenize()` calls (#1, #2, #3).
+
+### Added
+- Added integration test coverage for `Kiwi::global_config` and `Kiwi::set_global_config`.
+
 ## [2026.7.24] - 2026-07-24
 
 ### Fixed
