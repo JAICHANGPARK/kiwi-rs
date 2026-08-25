@@ -21,6 +21,8 @@ fn test_all_sequential() {
     run_join();
     run_add_user_word();
     run_global_config();
+    run_config_shortcuts();
+    run_typo_prepare();
 }
 
 fn run_global_config() {
@@ -30,6 +32,62 @@ fn run_global_config() {
     println!("Global config: {:?}", config);
     kiwi.set_global_config(config)
         .expect("Failed to set global config");
+}
+
+fn run_config_shortcuts() {
+    println!("Starting run_config_shortcuts");
+    let mut kiwi = get_kiwi();
+    let cutoff = kiwi.cutoff_threshold().expect("Failed to get cutoff");
+    kiwi.set_cutoff_threshold(cutoff)
+        .expect("Failed to set cutoff");
+
+    let allomorph = kiwi
+        .integrate_allomorph()
+        .expect("Failed to get integrate_allomorph");
+    kiwi.set_integrate_allomorph(allomorph)
+        .expect("Failed to set integrate_allomorph");
+
+    let penalty = kiwi.space_penalty().expect("Failed to get space_penalty");
+    kiwi.set_space_penalty(penalty)
+        .expect("Failed to set space_penalty");
+
+    let tolerance = kiwi
+        .space_tolerance()
+        .expect("Failed to get space_tolerance");
+    kiwi.set_space_tolerance(tolerance)
+        .expect("Failed to set space_tolerance");
+
+    let max_unk = kiwi
+        .max_unk_form_size()
+        .expect("Failed to get max_unk_form_size");
+    kiwi.set_max_unk_form_size(max_unk)
+        .expect("Failed to set max_unk_form_size");
+
+    let typo_weight = kiwi
+        .typo_cost_weight()
+        .expect("Failed to get typo_cost_weight");
+    kiwi.set_typo_cost_weight(typo_weight)
+        .expect("Failed to set typo_cost_weight");
+}
+
+fn run_typo_prepare() {
+    println!("Starting run_typo_prepare");
+    let library = KiwiLibrary::load_from_env_or_default().expect("Failed to load Kiwi library");
+    let typo = library.basic_typo().expect("Failed to create typo set");
+    let prepared = typo.prepare();
+    match prepared {
+        Ok(_prepared_typo) => {
+            println!("PreparedTypo successfully compiled and dropped.");
+        }
+        Err(KiwiError::SymbolLoad(_)) => {
+            println!(
+                "Kiwi library does not export kiwi_typo_prepare (pre-0.23), skipped gracefully."
+            );
+        }
+        Err(err) => {
+            panic!("Unexpected error from typo.prepare(): {err}");
+        }
+    }
 }
 
 // ... (existing functions)

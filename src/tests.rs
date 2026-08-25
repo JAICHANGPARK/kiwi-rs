@@ -1,4 +1,5 @@
 use crate::bootstrap::{extract_json_string_field, find_asset_url};
+use crate::constants::*;
 use crate::test_support::{with_env_var, with_env_vars};
 use crate::{
     AnalyzeOptions, BuilderConfig, KiwiConfig, KIWI_DIALECT_STANDARD,
@@ -153,6 +154,33 @@ fn kiwi_config_default_respects_kiwi_library_path() {
             Some(PathBuf::from("/tmp/libkiwi-test.so"))
         );
     });
+}
+
+#[test]
+fn match_options_constants_are_stable() {
+    assert_eq!(KIWI_MATCH_URL, 1);
+    assert_eq!(KIWI_MATCH_EMAIL, 2);
+    assert_eq!(KIWI_MATCH_HASHTAG, 4);
+    assert_eq!(KIWI_MATCH_MENTION, 8);
+    assert_eq!(KIWI_MATCH_SERIAL, 16);
+    assert_eq!(KIWI_MATCH_EMOJI, 32);
+    assert_eq!(KIWI_MATCH_OOV_RULE_ONLY, 0);
+    assert_eq!(KIWI_MATCH_OOV_CHR_MODEL, 1 << 8);
+    assert_eq!(KIWI_MATCH_OOV_CHR_FREQ_MODEL, 2 << 8);
+    assert_eq!(KIWI_MATCH_OOV_CHR_FREQ_BRANCH_MODEL, 3 << 8);
+    assert_eq!(KIWI_MATCH_OOV_MASK, 3 << 8);
+    assert_eq!(KIWI_MATCH_JOIN_PARTICLE_YO, 1 << 27);
+    assert_eq!(KIWI_MATCH_USE_OLD_SPLITTER, 1 << 30);
+    assert_eq!(
+        KIWI_MATCH_ALL,
+        KIWI_MATCH_URL
+            | KIWI_MATCH_EMAIL
+            | KIWI_MATCH_HASHTAG
+            | KIWI_MATCH_MENTION
+            | KIWI_MATCH_SERIAL
+            | KIWI_MATCH_EMOJI
+            | KIWI_MATCH_Z_CODA
+    );
 }
 
 #[test]
