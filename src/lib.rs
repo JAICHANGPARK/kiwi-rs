@@ -71,7 +71,7 @@ pub use model::{
 };
 pub use runtime::{
     Kiwi, KiwiBuilder, KiwiLibrary, KiwiTypo, MorphemeSet, PreparedJoinMorphs, PreparedJoiner,
-    Pretokenized, SwTokenizer,
+    PreparedTypo, Pretokenized, SwTokenizer,
 };
 pub use types::{
     Analysis, AnalysisCandidate, AnalyzeOptions, BuilderConfig, KiwiConfig, Sentence, Token,

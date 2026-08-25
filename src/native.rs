@@ -5,8 +5,8 @@ use std::ptr;
 
 use crate::config::{
     KiwiAnalyzeOption, KiwiBuilderHandle, KiwiHandle, KiwiJoinerHandle, KiwiMorphsetHandle,
-    KiwiPretokenizedHandle, KiwiResHandle, KiwiSsHandle, KiwiSwTokenizerHandle, KiwiTypoHandle,
-    KiwiWsHandle,
+    KiwiPreparedTypoHandle, KiwiPretokenizedHandle, KiwiResHandle, KiwiSsHandle,
+    KiwiSwTokenizerHandle, KiwiTypoHandle, KiwiWsHandle,
 };
 use crate::error::{KiwiError, Result};
 
@@ -221,6 +221,8 @@ type FnKiwiTypoScaleCost = unsafe extern "C" fn(KiwiTypoHandle, c_float) -> c_in
 type FnKiwiTypoSetContinualTypoCost = unsafe extern "C" fn(KiwiTypoHandle, c_float) -> c_int;
 type FnKiwiTypoSetLengtheningTypoCost = unsafe extern "C" fn(KiwiTypoHandle, c_float) -> c_int;
 type FnKiwiTypoClose = unsafe extern "C" fn(KiwiTypoHandle) -> c_int;
+type FnKiwiTypoPrepare = unsafe extern "C" fn(KiwiTypoHandle) -> KiwiPreparedTypoHandle;
+type FnKiwiPreparedTypoClose = unsafe extern "C" fn(KiwiPreparedTypoHandle) -> c_int;
 
 type FnKiwiSwtInit = unsafe extern "C" fn(*const c_char, KiwiHandle) -> KiwiSwTokenizerHandle;
 type FnKiwiSwtEncode = unsafe extern "C" fn(
@@ -278,6 +280,7 @@ type FnKiwiCongFromContextId =
     unsafe extern "C" fn(KiwiHandle, c_uint, *mut c_uint, c_int) -> c_int;
 type FnKiwiGetScriptName = unsafe extern "C" fn(u8) -> *const c_char;
 
+/// Raw C-ABI representation of `kiwi_morpheme_t`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct KiwiMorphemeRaw {
@@ -289,6 +292,7 @@ pub(crate) struct KiwiMorphemeRaw {
     pub(crate) dialect: u16,
 }
 
+/// Raw C-ABI representation of `kiwi_token_info_t`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct KiwiTokenInfoRaw {
@@ -307,16 +311,22 @@ pub(crate) struct KiwiTokenInfoRaw {
     pub(crate) dialect: u16,
 }
 
+/// Raw C-ABI representation of `kiwi_config_t` (Kiwi >= 0.23.0 layout).
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct KiwiGlobalConfigRaw {
     pub(crate) integrate_allomorph: u8,
     pub(crate) cut_off_threshold: c_float,
-    pub(crate) unk_form_score_scale: c_float,
-    pub(crate) unk_form_score_bias: c_float,
+    pub(crate) oov_rule_scale: c_float,
+    pub(crate) oov_rule_bias: c_float,
+    pub(crate) oov_chr_bias: c_float,
+    pub(crate) oov_global_weight: c_float,
+    pub(crate) oov_local_weight: c_float,
+    pub(crate) oov_global_min_freq: c_float,
     pub(crate) space_penalty: c_float,
     pub(crate) typo_cost_weight: c_float,
     pub(crate) max_unk_form_size: u32,
+    pub(crate) max_unk_form_size_followed_by_j_class: u32,
     pub(crate) space_tolerance: u32,
 }
 
@@ -325,16 +335,22 @@ impl Default for KiwiGlobalConfigRaw {
         Self {
             integrate_allomorph: 1,
             cut_off_threshold: 8.0,
-            unk_form_score_scale: 5.0,
-            unk_form_score_bias: 5.0,
+            oov_rule_scale: 4.0,
+            oov_rule_bias: 4.0,
+            oov_chr_bias: 0.0,
+            oov_global_weight: 35.0,
+            oov_local_weight: 3.0,
+            oov_global_min_freq: 4.0,
             space_penalty: 7.0,
             typo_cost_weight: 6.0,
             max_unk_form_size: 6,
+            max_unk_form_size_followed_by_j_class: u32::MAX,
             space_tolerance: 0,
         }
     }
 }
 
+/// Raw C-ABI representation of `kiwi_similarity_pair_t`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct KiwiSimilarityPairRaw {
@@ -400,6 +416,8 @@ pub(crate) struct KiwiApi {
     pub(crate) kiwi_typo_set_continual_typo_cost: Option<FnKiwiTypoSetContinualTypoCost>,
     pub(crate) kiwi_typo_set_lengthening_typo_cost: Option<FnKiwiTypoSetLengtheningTypoCost>,
     pub(crate) kiwi_typo_close: Option<FnKiwiTypoClose>,
+    pub(crate) kiwi_typo_prepare: Option<FnKiwiTypoPrepare>,
+    pub(crate) kiwi_prepared_typo_close: Option<FnKiwiPreparedTypoClose>,
     pub(crate) kiwi_set_global_config: Option<FnKiwiSetGlobalConfig>,
     pub(crate) kiwi_get_global_config: Option<FnKiwiGetGlobalConfig>,
     pub(crate) kiwi_builder_add_rule: Option<FnKiwiBuilderAddRule>,
@@ -510,6 +528,8 @@ impl KiwiApi {
             kiwi_typo_set_lengthening_typo_cost: library
                 .load_symbol_optional("kiwi_typo_set_lengthening_typo_cost")?,
             kiwi_typo_close: library.load_symbol_optional("kiwi_typo_close")?,
+            kiwi_typo_prepare: library.load_symbol_optional("kiwi_typo_prepare")?,
+            kiwi_prepared_typo_close: library.load_symbol_optional("kiwi_prepared_typo_close")?,
             kiwi_set_global_config: library.load_symbol_optional("kiwi_set_global_config")?,
             kiwi_get_global_config: library.load_symbol_optional("kiwi_get_global_config")?,
             kiwi_builder_add_rule: library.load_symbol_optional("kiwi_builder_add_rule")?,

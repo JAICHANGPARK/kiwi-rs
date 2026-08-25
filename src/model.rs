@@ -175,16 +175,26 @@ pub struct GlobalConfig {
     pub integrate_allomorph: bool,
     /// Candidate cut-off threshold.
     pub cut_off_threshold: f32,
-    /// Scale applied to unknown-form score.
+    /// Scale applied to unknown-form rule score (OOV rule scale).
     pub unk_form_score_scale: f32,
-    /// Bias applied to unknown-form score.
+    /// Bias applied to unknown-form rule score (OOV rule bias).
     pub unk_form_score_bias: f32,
+    /// Character model bias for OOV extraction.
+    pub oov_chr_bias: f32,
+    /// Global frequency weight for OOV extraction.
+    pub oov_global_weight: f32,
+    /// Local frequency weight for OOV extraction.
+    pub oov_local_weight: f32,
+    /// Minimum global frequency threshold for OOV extraction.
+    pub oov_global_min_freq: f32,
     /// Penalty for spacing decisions.
     pub space_penalty: f32,
     /// Weight applied to typo costs.
     pub typo_cost_weight: f32,
     /// Maximum unknown token length.
     pub max_unk_form_size: u32,
+    /// Maximum unknown token length when followed by a josa (particle).
+    pub max_unk_form_size_followed_by_j_class: u32,
     /// Allowed whitespace tolerance during analysis.
     pub space_tolerance: u32,
 }
@@ -200,11 +210,16 @@ impl From<KiwiGlobalConfigRaw> for GlobalConfig {
         Self {
             integrate_allomorph: value.integrate_allomorph != 0,
             cut_off_threshold: value.cut_off_threshold,
-            unk_form_score_scale: value.unk_form_score_scale,
-            unk_form_score_bias: value.unk_form_score_bias,
+            unk_form_score_scale: value.oov_rule_scale,
+            unk_form_score_bias: value.oov_rule_bias,
+            oov_chr_bias: value.oov_chr_bias,
+            oov_global_weight: value.oov_global_weight,
+            oov_local_weight: value.oov_local_weight,
+            oov_global_min_freq: value.oov_global_min_freq,
             space_penalty: value.space_penalty,
             typo_cost_weight: value.typo_cost_weight,
             max_unk_form_size: value.max_unk_form_size,
+            max_unk_form_size_followed_by_j_class: value.max_unk_form_size_followed_by_j_class,
             space_tolerance: value.space_tolerance,
         }
     }
@@ -215,11 +230,16 @@ impl From<GlobalConfig> for KiwiGlobalConfigRaw {
         Self {
             integrate_allomorph: if value.integrate_allomorph { 1 } else { 0 },
             cut_off_threshold: value.cut_off_threshold,
-            unk_form_score_scale: value.unk_form_score_scale,
-            unk_form_score_bias: value.unk_form_score_bias,
+            oov_rule_scale: value.unk_form_score_scale,
+            oov_rule_bias: value.unk_form_score_bias,
+            oov_chr_bias: value.oov_chr_bias,
+            oov_global_weight: value.oov_global_weight,
+            oov_local_weight: value.oov_local_weight,
+            oov_global_min_freq: value.oov_global_min_freq,
             space_penalty: value.space_penalty,
             typo_cost_weight: value.typo_cost_weight,
             max_unk_form_size: value.max_unk_form_size,
+            max_unk_form_size_followed_by_j_class: value.max_unk_form_size_followed_by_j_class,
             space_tolerance: value.space_tolerance,
         }
     }
@@ -300,11 +320,16 @@ mod model_tests {
         let config = GlobalConfig::default();
         assert!(config.integrate_allomorph);
         assert_eq!(config.cut_off_threshold, 8.0);
-        assert_eq!(config.unk_form_score_scale, 5.0);
-        assert_eq!(config.unk_form_score_bias, 5.0);
+        assert_eq!(config.unk_form_score_scale, 4.0);
+        assert_eq!(config.unk_form_score_bias, 4.0);
+        assert_eq!(config.oov_chr_bias, 0.0);
+        assert_eq!(config.oov_global_weight, 35.0);
+        assert_eq!(config.oov_local_weight, 3.0);
+        assert_eq!(config.oov_global_min_freq, 4.0);
         assert_eq!(config.space_penalty, 7.0);
         assert_eq!(config.typo_cost_weight, 6.0);
         assert_eq!(config.max_unk_form_size, 6);
+        assert_eq!(config.max_unk_form_size_followed_by_j_class, u32::MAX);
         assert_eq!(config.space_tolerance, 0);
     }
 
@@ -315,9 +340,14 @@ mod model_tests {
             cut_off_threshold: 4.2,
             unk_form_score_scale: 1.3,
             unk_form_score_bias: 0.4,
+            oov_chr_bias: 0.5,
+            oov_global_weight: 20.0,
+            oov_local_weight: 2.0,
+            oov_global_min_freq: 5.0,
             space_penalty: 9.0,
             typo_cost_weight: 2.5,
             max_unk_form_size: 12,
+            max_unk_form_size_followed_by_j_class: 8,
             space_tolerance: 3,
         };
 
@@ -329,9 +359,14 @@ mod model_tests {
         assert_eq!(round_trip.cut_off_threshold, 4.2);
         assert_eq!(round_trip.unk_form_score_scale, 1.3);
         assert_eq!(round_trip.unk_form_score_bias, 0.4);
+        assert_eq!(round_trip.oov_chr_bias, 0.5);
+        assert_eq!(round_trip.oov_global_weight, 20.0);
+        assert_eq!(round_trip.oov_local_weight, 2.0);
+        assert_eq!(round_trip.oov_global_min_freq, 5.0);
         assert_eq!(round_trip.space_penalty, 9.0);
         assert_eq!(round_trip.typo_cost_weight, 2.5);
         assert_eq!(round_trip.max_unk_form_size, 12);
+        assert_eq!(round_trip.max_unk_form_size_followed_by_j_class, 8);
         assert_eq!(round_trip.space_tolerance, 3);
     }
 

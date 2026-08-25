@@ -2,7 +2,7 @@ use kiwi_rs::*;
 
 fn get_kiwi() -> Kiwi {
     // Shared builder/library logic
-    KiwiLibrary::load_default()
+    KiwiLibrary::load_from_env_or_default()
         .expect("Failed to load Kiwi library")
         .builder(BuilderConfig::default())
         .expect("Failed to create builder")

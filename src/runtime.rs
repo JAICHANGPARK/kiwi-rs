@@ -1031,6 +1031,22 @@ impl KiwiTypo {
         Ok(())
     }
 
+    /// Compiles this typo set into an immutable [`PreparedTypo`] transformer.
+    ///
+    /// The compiled transformer can be reused across analysis requests
+    /// without re-compiling the typo graph.
+    pub fn prepare(&self) -> Result<PreparedTypo> {
+        let prepare_fn =
+            require_optional_api(self.inner.api.kiwi_typo_prepare, "kiwi_typo_prepare")?;
+        clear_kiwi_error(&self.inner.api);
+        let handle = unsafe { prepare_fn(self.handle) };
+        PreparedTypo::from_handle(
+            self.inner.clone(),
+            handle,
+            "kiwi_typo_prepare returned a null handle",
+        )
+    }
+
     fn from_handle(
         inner: Arc<LoadedLibrary>,
         handle: KiwiTypoHandle,
@@ -1045,6 +1061,42 @@ impl KiwiTypo {
             handle,
             owned,
         })
+    }
+}
+
+/// Pre-compiled typo transformer created from [`KiwiTypo::prepare`].
+///
+/// This struct wraps a native Kiwi prepared typo handle (`kiwi_prepared_typo_h`)
+/// with RAII semantics, automatically closing the native resource when dropped.
+pub struct PreparedTypo {
+    inner: Arc<LoadedLibrary>,
+    pub(crate) handle: crate::config::KiwiPreparedTypoHandle,
+}
+
+impl PreparedTypo {
+    fn from_handle(
+        inner: Arc<LoadedLibrary>,
+        handle: crate::config::KiwiPreparedTypoHandle,
+        fallback: &'static str,
+    ) -> Result<Self> {
+        if handle.is_null() {
+            return Err(api_error(&inner.api, fallback));
+        }
+        Ok(Self { inner, handle })
+    }
+}
+
+impl Drop for PreparedTypo {
+    fn drop(&mut self) {
+        if self.handle.is_null() {
+            return;
+        }
+        if let Some(close) = self.inner.api.kiwi_prepared_typo_close {
+            unsafe {
+                close(self.handle);
+            }
+        }
+        self.handle = ptr::null_mut();
     }
 }
 

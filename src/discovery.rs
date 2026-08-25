@@ -1,3 +1,5 @@
+//! Path discovery helpers for finding installed Kiwi libraries and models.
+
 use std::env;
 use std::path::PathBuf;
 

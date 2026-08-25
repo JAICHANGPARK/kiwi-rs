@@ -50,6 +50,20 @@ pub const KIWI_MATCH_HASHTAG: i32 = 4;
 pub const KIWI_MATCH_MENTION: i32 = 8;
 /// Match option: serial number detection.
 pub const KIWI_MATCH_SERIAL: i32 = 16;
+/// Match option: emoji detection.
+pub const KIWI_MATCH_EMOJI: i32 = 1 << 5;
+
+/// Match option: extract OOV by rule only.
+pub const KIWI_MATCH_OOV_RULE_ONLY: i32 = 0 << 8;
+/// Match option: extract OOV by character model.
+pub const KIWI_MATCH_OOV_CHR_MODEL: i32 = 1 << 8;
+/// Match option: extract OOV by character and frequency model.
+pub const KIWI_MATCH_OOV_CHR_FREQ_MODEL: i32 = 2 << 8;
+/// Match option: extract OOV by character, frequency, and branch model.
+pub const KIWI_MATCH_OOV_CHR_FREQ_BRANCH_MODEL: i32 = 3 << 8;
+/// Match option: OOV model selection mask.
+pub const KIWI_MATCH_OOV_MASK: i32 = 3 << 8;
+
 /// Match option: normalize coda.
 pub const KIWI_MATCH_NORMALIZE_CODA: i32 = 1 << 16;
 /// Match option: join noun prefixes.
@@ -79,6 +93,10 @@ pub const KIWI_MATCH_COMPATIBLE_JAMO: i32 = 1 << 24;
 pub const KIWI_MATCH_SPLIT_SAISIOT: i32 = 1 << 25;
 /// Match option: merge saisiot.
 pub const KIWI_MATCH_MERGE_SAISIOT: i32 = 1 << 26;
+/// Match option: join particle 'yo'.
+pub const KIWI_MATCH_JOIN_PARTICLE_YO: i32 = 1 << 27;
+/// Match option: use old splitter algorithm.
+pub const KIWI_MATCH_USE_OLD_SPLITTER: i32 = 1 << 30;
 
 /// Common default match options.
 pub const KIWI_MATCH_ALL: i32 = KIWI_MATCH_URL
@@ -86,6 +104,7 @@ pub const KIWI_MATCH_ALL: i32 = KIWI_MATCH_URL
     | KIWI_MATCH_HASHTAG
     | KIWI_MATCH_MENTION
     | KIWI_MATCH_SERIAL
+    | KIWI_MATCH_EMOJI
     | KIWI_MATCH_Z_CODA;
 /// `KIWI_MATCH_ALL` with coda normalization.
 pub const KIWI_MATCH_ALL_WITH_NORMALIZING: i32 = KIWI_MATCH_ALL | KIWI_MATCH_NORMALIZE_CODA;

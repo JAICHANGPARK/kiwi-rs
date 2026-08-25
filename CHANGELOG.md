@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.8.26] - 2026-08-25
+
+### Fixed
+- Fixed C ABI layout mismatch in `KiwiGlobalConfigRaw` (`kiwi_config_t`) by aligning to Kiwi >= 0.23.0 52-byte layout with OOV parameters, preventing potential stack overflow and field offset shifts during `global_config` get/set operations.
+
+### Added
+- Added `PreparedTypo` RAII wrapper and `KiwiTypo::prepare` method for pre-compiled typo transformers (`kiwi_typo_prepare`, `kiwi_prepared_typo_close`).
+- Added Kiwi 0.23 match option constants (`KIWI_MATCH_EMOJI`, `KIWI_MATCH_OOV_RULE_ONLY`, `KIWI_MATCH_OOV_CHR_MODEL`, `KIWI_MATCH_OOV_CHR_FREQ_MODEL`, `KIWI_MATCH_OOV_CHR_FREQ_BRANCH_MODEL`, `KIWI_MATCH_OOV_MASK`, `KIWI_MATCH_JOIN_PARTICLE_YO`, `KIWI_MATCH_USE_OLD_SPLITTER`).
+- Updated `KIWI_MATCH_ALL` to include `KIWI_MATCH_EMOJI` matching Kiwi 0.23 official definition.
+- Extended `GlobalConfig` with full OOV extraction parameters (`oov_chr_bias`, `oov_global_weight`, `oov_local_weight`, `oov_global_min_freq`, `max_unk_form_size_followed_by_j_class`).
+
 ## [2026.8.25] - 2026-08-25
 
 ### Fixed

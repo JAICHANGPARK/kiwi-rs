@@ -1,3 +1,5 @@
+//! Automatic downloading and caching bootstrap logic for Kiwi native assets.
+
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
