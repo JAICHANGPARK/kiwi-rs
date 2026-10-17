@@ -1,12 +1,12 @@
 # kiwi-rs의 kiwipiepy 호환성 현황
 
-기준 시점: 2026-02-17
+기준 시점: 2026-10-17
 
 검증 기준:
 
-- `kiwipiepy==0.22.2` 런타임 API 점검 (`dir(kiwipiepy.Kiwi)` 및 패키지 심볼 확인).
-- `kiwi-rs` 소스 (`src/runtime.rs`, `src/types.rs`, `src/native.rs`) 기준 `v0.1.4`.
-- `src/native.rs`의 C API 로더 테이블 (`KiwiApi` 필드 `101`, `load_symbol*` 호출 `101`).
+- `kiwipiepy` / 상위 Kiwi `v0.24.0` (`HEAD`) 런타임 및 C API 점검 (`include/kiwi/capi.h`).
+- `kiwi-rs` 소스 (`src/runtime.rs`, `src/types.rs`, `src/native.rs`, `src/constants.rs`, `src/model.rs`).
+- `src/native.rs`의 C API 로더 테이블 (`KiwiApi` 필드 `106`, `load_symbol*` 호출 `106`).
 
 ## 상태 정의
 
@@ -16,7 +16,7 @@
 
 ## 계층별 진행 수준
 
-1. C API 커버리지: `완료` (`src/native.rs` 로더 엔트리 `101/101`)
+1. C API 커버리지: `완료` (`src/native.rs` 로더 엔트리 `106/106`)
 2. 고수준 Rust API 커버리지: 핵심 NLP 흐름은 `높은 수준`
 3. `kiwipiepy` 전체 표면 호환: `부분 지원`
 
@@ -24,15 +24,15 @@
 
 | kiwipiepy API | 상태 | kiwi-rs API / 비고 |
 |---|---|---|
-| `Kiwi.add_user_word` | Partial | `KiwiBuilder::add_user_word` (builder 단계) |
+| `Kiwi.add_user_word` | Partial | `KiwiBuilder::add_user_word`, `KiwiBuilder::add_user_word_with_def`, `KiwiBuilder::add_alias_word`, `KiwiBuilder::add_alias_word_with_def` (builder 단계) |
 | `Kiwi.add_pre_analyzed_word` | Partial | `KiwiBuilder::add_pre_analyzed_word` (builder 단계) |
 | `Kiwi.load_user_dictionary` | Partial | `KiwiBuilder::load_user_dictionary` (builder 단계) |
 | `Kiwi.add_rule` | Partial | `KiwiBuilder::add_rule` (builder 단계) |
 | `Kiwi.add_re_rule` | Partial | `KiwiBuilder::add_re_rule` (builder 단계); Python `re.sub`와 완전 동일하진 않음 |
 | `Kiwi.add_re_word` | Partial | `Kiwi::add_re_word(pattern, tag)`; callback/user_value 변형 미노출 |
 | `Kiwi.clear_re_words` | Equivalent | `Kiwi::clear_re_words` |
-| `Kiwi.analyze` | Partial | `Kiwi::analyze*`, `Kiwi::analyze_many_with_options`, `Kiwi::analyze_many_via_native` |
-| `Kiwi.tokenize` | Partial | `Kiwi::tokenize*`, blocklist/pretokenized/batch 변형 지원; `Stopwords` 헬퍼 없음 |
+| `Kiwi.analyze` | Partial | `Kiwi::analyze*`, `Kiwi::analyze_with_typo`, `Kiwi::analyze_many_with_options`, `Kiwi::analyze_many_via_native` |
+| `Kiwi.tokenize` | Partial | `Kiwi::tokenize*`, `Kiwi::tokenize_with_typo`, blocklist/pretokenized/batch 변형 지원; `Stopwords` 헬퍼 없음 |
 | `Kiwi.split_into_sents` | Partial | `split_into_sents*`, `split_into_sents_with_options*`; Python namedtuple 표면과는 다름 |
 
 ## 런타임 설정/메타데이터
@@ -40,10 +40,10 @@
 | kiwipiepy API | 상태 | kiwi-rs API / 비고 |
 |---|---|---|
 | `Kiwi.global_config` | Equivalent | `Kiwi::global_config`, `Kiwi::set_global_config` |
-| deprecated property들 (`cutoff_threshold` 등) | Equivalent | Rust 메서드 형태로 제공 (`cutoff_threshold`, `set_cutoff_threshold`, ...) |
+| deprecated property들 (`cutoff_threshold` 등) | Equivalent | Rust 메서드 형태로 제공 (`cutoff_threshold`, `set_cutoff_threshold`, OOV rule/chr/global/local 단축 메서드 등) |
 | `Kiwi.num_workers` | Equivalent | `Kiwi::num_workers` |
 | `Kiwi.model_type` | Equivalent | `Kiwi::model_type` |
-| `Kiwi.typo_cost_threshold` | Equivalent | `Kiwi::typo_cost_threshold` |
+| `Kiwi.typo_cost_threshold` | Equivalent | `Kiwi::typo_cost_threshold`, `AnalyzeOptions::with_typo_threshold` |
 | `Kiwi.list_senses` | Equivalent | `Kiwi::list_senses` |
 | `Kiwi.list_all_scripts` | Equivalent | `Kiwi::list_all_scripts` |
 | `Kiwi.morpheme` | Partial | `Kiwi::morpheme(morph_id)`는 ID 중심 |
@@ -54,8 +54,8 @@
 | kiwipiepy API | 상태 | kiwi-rs API / 비고 |
 |---|---|---|
 | `Kiwi.join` | Partial | `Kiwi::join`; `return_positions`류 출력 미지원 |
-| `Kiwi.space` | Partial | `Kiwi::space`, `Kiwi::space_many`; Rust 측 휴리스틱 구현 |
-| `Kiwi.glue` | Partial | `Kiwi::glue`, `Kiwi::glue_with_options` |
+| `Kiwi.space` | Equivalent | `Kiwi::space`, `Kiwi::space_via_native` (`kiwi_space`), `Kiwi::space_many` |
+| `Kiwi.glue` | Equivalent | `Kiwi::glue`, `Kiwi::glue_with_options`, `Kiwi::glue_via_native`, `Kiwi::glue_with_options_via_native` (`kiwi_glue`) |
 | `Kiwi.template` | Unavailable | Python 템플릿 계층, 대응 C API 없음 |
 
 ## CoNg 의미 API
@@ -83,7 +83,7 @@
 
 | kiwipiepy 표면 | kiwi-rs 상태 | 비고 |
 |---|---|---|
-| `TypoTransformer`, `TypoDefinition` preset | Partial | `KiwiTypo`는 있으나 Python 클래스 구조/preset과 다름 |
+| `TypoTransformer`, `TypoDefinition` preset | Partial | `KiwiTypo`, `PreparedTypo` (`KiwiTypo::prepare`), `KIWI_TYPO_*` preset 제공; Python 클래스 구조와 다름 |
 | `HSDataset` | Unavailable | Python/C++ 계층 |
 | `NgramExtractor` | Unavailable | 대응 C API 없음 |
 | `Template` / `Kiwi.template` | Unavailable | Python 템플릿 계층 |

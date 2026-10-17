@@ -41,6 +41,23 @@ type FnKiwiBuilderAddAliasWord = unsafe extern "C" fn(
     c_float,
     *const c_char,
 ) -> c_int;
+type FnKiwiBuilderAddWordWithDef = unsafe extern "C" fn(
+    KiwiBuilderHandle,
+    *const c_char,
+    *const c_char,
+    c_int,
+    c_int,
+    c_float,
+) -> c_int;
+type FnKiwiBuilderAddAliasWordWithDef = unsafe extern "C" fn(
+    KiwiBuilderHandle,
+    *const c_char,
+    *const c_char,
+    c_int,
+    c_int,
+    c_float,
+    *const c_char,
+) -> c_int;
 type FnKiwiBuilderAddPreAnalyzedWord = unsafe extern "C" fn(
     KiwiBuilderHandle,
     *const c_char,
@@ -99,7 +116,7 @@ type FnKiwiBuilderExtractAddWordsW = unsafe extern "C" fn(
 ) -> KiwiWsHandle;
 type FnKiwiBuilderBuild =
     unsafe extern "C" fn(KiwiBuilderHandle, KiwiTypoHandle, c_float) -> KiwiHandle;
-type FnKiwiInit = unsafe extern "C" fn(*const c_char, c_int, c_int) -> KiwiHandle;
+type FnKiwiInit = unsafe extern "C" fn(*const c_char, c_int, c_int, c_int) -> KiwiHandle;
 type FnKiwiClose = unsafe extern "C" fn(KiwiHandle) -> c_int;
 type FnKiwiSetGlobalConfig = unsafe extern "C" fn(KiwiHandle, KiwiGlobalConfigRaw);
 type FnKiwiGetGlobalConfig = unsafe extern "C" fn(KiwiHandle) -> KiwiGlobalConfigRaw;
@@ -279,6 +296,15 @@ type FnKiwiCongToContextId = unsafe extern "C" fn(KiwiHandle, *const c_uint, c_i
 type FnKiwiCongFromContextId =
     unsafe extern "C" fn(KiwiHandle, c_uint, *mut c_uint, c_int) -> c_int;
 type FnKiwiGetScriptName = unsafe extern "C" fn(u8) -> *const c_char;
+type FnKiwiSpace = unsafe extern "C" fn(KiwiHandle, *const c_char, c_int) -> *const c_char;
+type FnKiwiGlue = unsafe extern "C" fn(
+    KiwiHandle,
+    *const *const c_char,
+    c_int,
+    *const c_char,
+    *mut c_char,
+) -> *const c_char;
+type FnKiwiFreeString = unsafe extern "C" fn(*const c_char) -> c_int;
 
 /// Raw C-ABI representation of `kiwi_morpheme_t`.
 #[repr(C)]
@@ -422,6 +448,8 @@ pub(crate) struct KiwiApi {
     pub(crate) kiwi_get_global_config: Option<FnKiwiGetGlobalConfig>,
     pub(crate) kiwi_builder_add_rule: Option<FnKiwiBuilderAddRule>,
     pub(crate) kiwi_builder_add_alias_word: Option<FnKiwiBuilderAddAliasWord>,
+    pub(crate) kiwi_builder_add_word_with_def: Option<FnKiwiBuilderAddWordWithDef>,
+    pub(crate) kiwi_builder_add_alias_word_with_def: Option<FnKiwiBuilderAddAliasWordWithDef>,
     pub(crate) kiwi_builder_add_pre_analyzed_word: Option<FnKiwiBuilderAddPreAnalyzedWord>,
     pub(crate) kiwi_builder_load_dict: Option<FnKiwiBuilderLoadDict>,
     pub(crate) kiwi_builder_extract_words: Option<FnKiwiBuilderExtractWords>,
@@ -464,6 +492,9 @@ pub(crate) struct KiwiApi {
     pub(crate) kiwi_swt_decode: Option<FnKiwiSwtDecode>,
     pub(crate) kiwi_swt_close: Option<FnKiwiSwtClose>,
     pub(crate) kiwi_get_script_name: Option<FnKiwiGetScriptName>,
+    pub(crate) kiwi_space: Option<FnKiwiSpace>,
+    pub(crate) kiwi_glue: Option<FnKiwiGlue>,
+    pub(crate) kiwi_free_string: Option<FnKiwiFreeString>,
 }
 
 impl KiwiApi {
@@ -535,6 +566,10 @@ impl KiwiApi {
             kiwi_builder_add_rule: library.load_symbol_optional("kiwi_builder_add_rule")?,
             kiwi_builder_add_alias_word: library
                 .load_symbol_optional("kiwi_builder_add_alias_word")?,
+            kiwi_builder_add_word_with_def: library
+                .load_symbol_optional("kiwi_builder_add_word_with_def")?,
+            kiwi_builder_add_alias_word_with_def: library
+                .load_symbol_optional("kiwi_builder_add_alias_word_with_def")?,
             kiwi_builder_add_pre_analyzed_word: library
                 .load_symbol_optional("kiwi_builder_add_pre_analyzed_word")?,
             kiwi_builder_load_dict: library.load_symbol_optional("kiwi_builder_load_dict")?,
@@ -587,6 +622,9 @@ impl KiwiApi {
             kiwi_swt_decode: library.load_symbol_optional("kiwi_swt_decode")?,
             kiwi_swt_close: library.load_symbol_optional("kiwi_swt_close")?,
             kiwi_get_script_name: library.load_symbol_optional("kiwi_get_script_name")?,
+            kiwi_space: library.load_symbol_optional("kiwi_space")?,
+            kiwi_glue: library.load_symbol_optional("kiwi_glue")?,
+            kiwi_free_string: library.load_symbol_optional("kiwi_free_string")?,
         })
     }
 }

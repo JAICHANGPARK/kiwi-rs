@@ -12,10 +12,10 @@ use regex::Regex;
 use crate::bootstrap::prepare_assets;
 use crate::config::{
     KiwiAnalyzeOption, KiwiBuilderHandle, KiwiHandle, KiwiJoinerHandle, KiwiMorphsetHandle,
-    KiwiPretokenizedHandle, KiwiResHandle, KiwiSsHandle, KiwiSwTokenizerHandle, KiwiTypoHandle,
-    KiwiWsHandle,
+    KiwiPreparedTypoHandle, KiwiPretokenizedHandle, KiwiResHandle, KiwiSsHandle,
+    KiwiSwTokenizerHandle, KiwiTypoHandle, KiwiWsHandle,
 };
-use crate::constants::{KIWI_MATCH_ALL, KIWI_MATCH_Z_CODA};
+use crate::constants::{KIWI_DIALECT_STANDARD, KIWI_MATCH_ALL, KIWI_MATCH_Z_CODA};
 use crate::discovery::{default_library_candidates, discover_default_library_path};
 use crate::error::{KiwiError, Result};
 use crate::model::{
@@ -123,6 +123,32 @@ impl KiwiLibrary {
     /// Returns whether stream-based builder initialization is available.
     pub fn supports_builder_init_stream(&self) -> bool {
         self.inner.api.kiwi_builder_init_stream.is_some()
+    }
+
+    /// Returns whether extended builder word definition APIs
+    /// (`kiwi_builder_add_word_with_def` and `kiwi_builder_add_alias_word_with_def`)
+    /// are available in the loaded Kiwi library.
+    pub fn supports_builder_word_with_def(&self) -> bool {
+        self.inner.api.kiwi_builder_add_word_with_def.is_some()
+            && self
+                .inner
+                .api
+                .kiwi_builder_add_alias_word_with_def
+                .is_some()
+    }
+
+    /// Returns whether pre-compiled typo transformer APIs
+    /// (`kiwi_typo_prepare` and `kiwi_prepared_typo_close`) are available.
+    pub fn supports_typo_prepare(&self) -> bool {
+        self.inner.api.kiwi_typo_prepare.is_some()
+            && self.inner.api.kiwi_prepared_typo_close.is_some()
+    }
+
+    /// Returns whether native `kiwi_space`, `kiwi_glue`, and `kiwi_free_string`
+    /// C APIs are available in the loaded Kiwi library.
+    pub fn supports_native_space_and_glue(&self) -> bool {
+        let api = &self.inner.api;
+        api.kiwi_space.is_some() && api.kiwi_glue.is_some() && api.kiwi_free_string.is_some()
     }
 
     /// Returns whether UTF-16 APIs are available in the loaded Kiwi library.
@@ -295,6 +321,44 @@ impl KiwiBuilder {
         Ok(())
     }
 
+    /// Adds one user dictionary word with explicit sense ID and dialect flags
+    /// (`kiwi_builder_add_word_with_def`).
+    pub fn add_user_word_with_def(
+        &mut self,
+        word: &str,
+        tag: &str,
+        sense_id: u8,
+        dialect: i32,
+        score: f32,
+    ) -> Result<()> {
+        let add_word_def = require_optional_api(
+            self.inner.api.kiwi_builder_add_word_with_def,
+            "kiwi_builder_add_word_with_def",
+        )?;
+
+        let word_c = CString::new(word)?;
+        let tag_c = CString::new(tag)?;
+
+        clear_kiwi_error(&self.inner.api);
+        let result = unsafe {
+            add_word_def(
+                self.handle,
+                word_c.as_ptr(),
+                tag_c.as_ptr(),
+                sense_id as c_int,
+                dialect as c_int,
+                score as c_float,
+            )
+        };
+        if result < 0 {
+            return Err(api_error(
+                &self.inner.api,
+                "kiwi_builder_add_word_with_def returned an error",
+            ));
+        }
+        Ok(())
+    }
+
     /// Adds an alias entry that maps `alias` to `orig_word`.
     pub fn add_alias_word(
         &mut self,
@@ -327,6 +391,50 @@ impl KiwiBuilder {
             return Err(api_error(
                 &self.inner.api,
                 "kiwi_builder_add_alias_word returned an error",
+            ));
+        }
+
+        Ok(())
+    }
+
+    /// Adds an alias entry that maps `alias` to `orig_word` with explicit sense ID
+    /// and dialect flags (`kiwi_builder_add_alias_word_with_def`).
+    #[allow(clippy::too_many_arguments)]
+    pub fn add_alias_word_with_def(
+        &mut self,
+        alias: &str,
+        tag: &str,
+        sense_id: u8,
+        dialect: i32,
+        score: f32,
+        orig_word: &str,
+    ) -> Result<()> {
+        let add_alias_def = require_optional_api(
+            self.inner.api.kiwi_builder_add_alias_word_with_def,
+            "kiwi_builder_add_alias_word_with_def",
+        )?;
+
+        let alias_c = CString::new(alias)?;
+        let tag_c = CString::new(tag)?;
+        let orig_word_c = CString::new(orig_word)?;
+
+        clear_kiwi_error(&self.inner.api);
+        let result = unsafe {
+            add_alias_def(
+                self.handle,
+                alias_c.as_ptr(),
+                tag_c.as_ptr(),
+                sense_id as c_int,
+                dialect as c_int,
+                score as c_float,
+                orig_word_c.as_ptr(),
+            )
+        };
+
+        if result < 0 {
+            return Err(api_error(
+                &self.inner.api,
+                "kiwi_builder_add_alias_word_with_def returned an error",
             ));
         }
 
@@ -786,8 +894,9 @@ impl KiwiBuilder {
     pub fn build_with_typo_and_default_options(
         mut self,
         typo: Option<&KiwiTypo>,
-        default_options: AnalyzeOptions,
+        mut default_options: AnalyzeOptions,
     ) -> Result<Kiwi> {
+        let mut default_typo = None;
         let typo_handle = match typo {
             Some(value) => {
                 if !Arc::ptr_eq(&self.inner, &value.inner) {
@@ -795,10 +904,19 @@ impl KiwiBuilder {
                         "KiwiTypo was created from a different Kiwi library".to_string(),
                     ));
                 }
+                if self.inner.api.kiwi_typo_prepare.is_some() {
+                    if let Ok(prepared) = value.prepare() {
+                        default_typo = Some(Arc::new(prepared));
+                    }
+                }
                 value.handle
             }
             None => ptr::null_mut(),
         };
+
+        if self.typo_cost_threshold > 0.0 && (default_options.typo_threshold - 2.5).abs() < 1e-6 {
+            default_options.typo_threshold = self.typo_cost_threshold;
+        }
 
         clear_kiwi_error(&self.inner.api);
         let _guard = KIWI_INIT_LOCK.lock().unwrap();
@@ -821,6 +939,7 @@ impl KiwiBuilder {
             inner: self.inner.clone(),
             handle,
             default_analyze_options: default_options,
+            default_typo,
             num_workers: self.num_threads,
             model_type: self.build_options,
             typo_cost_threshold: self.typo_cost_threshold,
@@ -1072,6 +1191,9 @@ pub struct PreparedTypo {
     inner: Arc<LoadedLibrary>,
     pub(crate) handle: crate::config::KiwiPreparedTypoHandle,
 }
+
+unsafe impl Send for PreparedTypo {}
+unsafe impl Sync for PreparedTypo {}
 
 impl PreparedTypo {
     fn from_handle(
@@ -1443,15 +1565,19 @@ struct TokenizeCacheKey {
     open_ending: bool,
     allowed_dialects: i32,
     dialect_cost_bits: u32,
+    typo_threshold_bits: u32,
+    typo_handle: usize,
 }
 
 impl TokenizeCacheKey {
-    fn from_options(options: AnalyzeOptions) -> Self {
+    fn from_options(options: AnalyzeOptions, typo_handle: usize) -> Self {
         Self {
             match_options: options.match_options,
             open_ending: options.open_ending,
             allowed_dialects: options.allowed_dialects,
             dialect_cost_bits: options.dialect_cost.to_bits(),
+            typo_threshold_bits: options.typo_threshold.to_bits(),
+            typo_handle,
         }
     }
 }
@@ -1476,16 +1602,20 @@ struct AnalyzeCacheKey {
     open_ending: bool,
     allowed_dialects: i32,
     dialect_cost_bits: u32,
+    typo_threshold_bits: u32,
+    typo_handle: usize,
 }
 
 impl AnalyzeCacheKey {
-    fn from_options(options: AnalyzeOptions) -> Self {
+    fn from_options(options: AnalyzeOptions, typo_handle: usize) -> Self {
         Self {
             top_n: options.top_n,
             match_options: options.match_options,
             open_ending: options.open_ending,
             allowed_dialects: options.allowed_dialects,
             dialect_cost_bits: options.dialect_cost.to_bits(),
+            typo_threshold_bits: options.typo_threshold.to_bits(),
+            typo_handle,
         }
     }
 }
@@ -1628,6 +1758,7 @@ pub struct Kiwi {
     inner: Arc<LoadedLibrary>,
     handle: KiwiHandle,
     default_analyze_options: AnalyzeOptions,
+    default_typo: Option<Arc<PreparedTypo>>,
     num_workers: i32,
     model_type: i32,
     typo_cost_threshold: f32,
@@ -1701,13 +1832,30 @@ impl Kiwi {
         Self::from_config(KiwiConfig::default())
     }
 
-    /// Initializes Kiwi directly via the low-level `kiwi_init` API.
+    /// Initializes Kiwi directly via the low-level `kiwi_init` API with standard dialects.
     ///
     /// Prefer [`Self::from_config`] for regular use.
     pub fn init_direct(
         model_path: Option<&Path>,
         num_threads: i32,
         build_options: i32,
+    ) -> Result<Self> {
+        Self::init_direct_with_dialects(
+            model_path,
+            num_threads,
+            build_options,
+            KIWI_DIALECT_STANDARD,
+        )
+    }
+
+    /// Initializes Kiwi directly via the low-level `kiwi_init` API with explicit `enabled_dialects`.
+    ///
+    /// Prefer [`Self::from_config`] for regular use.
+    pub fn init_direct_with_dialects(
+        model_path: Option<&Path>,
+        num_threads: i32,
+        build_options: i32,
+        enabled_dialects: i32,
     ) -> Result<Self> {
         let library = KiwiLibrary::load_from_env_or_default()?;
         let init = require_optional_api(library.inner.api.kiwi_init, "kiwi_init")?;
@@ -1720,7 +1868,14 @@ impl Kiwi {
 
         clear_kiwi_error(&library.inner.api);
         let _guard = KIWI_INIT_LOCK.lock().unwrap();
-        let handle = unsafe { init(model_path_ptr, num_threads as c_int, build_options as c_int) };
+        let handle = unsafe {
+            init(
+                model_path_ptr,
+                num_threads as c_int,
+                build_options as c_int,
+                enabled_dialects as c_int,
+            )
+        };
 
         if handle.is_null() {
             return Err(api_error(
@@ -1734,6 +1889,7 @@ impl Kiwi {
             inner: library.inner,
             handle,
             default_analyze_options: AnalyzeOptions::default(),
+            default_typo: None,
             num_workers: num_threads,
             model_type: build_options,
             typo_cost_threshold: 0.0,
@@ -1795,6 +1951,30 @@ impl Kiwi {
             inner: self.inner.clone(),
         };
         library.supports_utf16_api()
+    }
+
+    /// Returns whether `kiwi_builder_add_word_with_def` and `kiwi_builder_add_alias_word_with_def` are available.
+    pub fn supports_builder_word_with_def(&self) -> bool {
+        let library = KiwiLibrary {
+            inner: self.inner.clone(),
+        };
+        library.supports_builder_word_with_def()
+    }
+
+    /// Returns whether `kiwi_typo_prepare` and `kiwi_prepared_typo_close` are available.
+    pub fn supports_typo_prepare(&self) -> bool {
+        let library = KiwiLibrary {
+            inner: self.inner.clone(),
+        };
+        library.supports_typo_prepare()
+    }
+
+    /// Returns whether native `kiwi_space`, `kiwi_glue`, and `kiwi_free_string` APIs are available.
+    pub fn supports_native_space_and_glue(&self) -> bool {
+        let library = KiwiLibrary {
+            inner: self.inner.clone(),
+        };
+        library.supports_native_space_and_glue()
     }
 
     /// Creates an empty mutable typo set.
@@ -1949,6 +2129,51 @@ impl Kiwi {
         self.clear_inference_caches();
     }
 
+    /// Returns the default [`PreparedTypo`] transformer used by analyze/tokenize APIs, if set.
+    pub fn default_prepared_typo(&self) -> Option<&PreparedTypo> {
+        self.default_typo.as_deref()
+    }
+
+    /// Sets or clears the default [`PreparedTypo`] transformer used by analyze/tokenize APIs.
+    pub fn set_default_prepared_typo(&mut self, typo: Option<PreparedTypo>) -> Result<()> {
+        if let Some(ref value) = typo {
+            if !Arc::ptr_eq(&self.inner, &value.inner) {
+                return Err(KiwiError::InvalidArgument(
+                    "PreparedTypo was created from a different Kiwi instance".to_string(),
+                ));
+            }
+        }
+        self.default_typo = typo.map(Arc::new);
+        self.clear_inference_caches();
+        Ok(())
+    }
+
+    fn default_typo_handle_addr(&self) -> usize {
+        self.default_typo
+            .as_ref()
+            .map_or(0, |typo| typo.handle as usize)
+    }
+
+    fn resolve_typo_handle(
+        &self,
+        override_typo: Option<&PreparedTypo>,
+    ) -> Result<KiwiPreparedTypoHandle> {
+        match override_typo {
+            Some(typo) => {
+                if !Arc::ptr_eq(&self.inner, &typo.inner) {
+                    return Err(KiwiError::InvalidArgument(
+                        "PreparedTypo was created from a different Kiwi instance".to_string(),
+                    ));
+                }
+                Ok(typo.handle)
+            }
+            None => Ok(self
+                .default_typo
+                .as_ref()
+                .map_or(ptr::null_mut(), |typo| typo.handle)),
+        }
+    }
+
     /// Returns configured worker count captured at initialization time.
     pub fn num_workers(&self) -> i32 {
         self.num_workers
@@ -2033,6 +2258,110 @@ impl Kiwi {
     pub fn set_typo_cost_weight(&mut self, value: f32) -> Result<()> {
         let mut config = self.global_config()?;
         config.typo_cost_weight = value;
+        self.set_global_config(config)
+    }
+
+    /// Shortcut for `global_config().max_unk_form_size_followed_by_j_class`.
+    pub fn max_unk_form_size_followed_by_j_class(&self) -> Result<u32> {
+        Ok(self.global_config()?.max_unk_form_size_followed_by_j_class)
+    }
+
+    /// Updates only the `max_unk_form_size_followed_by_j_class` global field.
+    pub fn set_max_unk_form_size_followed_by_j_class(&mut self, value: u32) -> Result<()> {
+        let mut config = self.global_config()?;
+        config.max_unk_form_size_followed_by_j_class = value;
+        self.set_global_config(config)
+    }
+
+    /// Shortcut for `global_config().unk_form_score_scale` (OOV rule scale).
+    pub fn unk_form_score_scale(&self) -> Result<f32> {
+        Ok(self.global_config()?.unk_form_score_scale)
+    }
+
+    /// Updates only the `unk_form_score_scale` (OOV rule scale) global field.
+    pub fn set_unk_form_score_scale(&mut self, value: f32) -> Result<()> {
+        let mut config = self.global_config()?;
+        config.unk_form_score_scale = value;
+        self.set_global_config(config)
+    }
+
+    /// Shortcut for `global_config().unk_form_score_scale` (`kiwi_config_t.oov_rule_scale`).
+    pub fn oov_rule_scale(&self) -> Result<f32> {
+        self.unk_form_score_scale()
+    }
+
+    /// Updates only the `unk_form_score_scale` (`kiwi_config_t.oov_rule_scale`) global field.
+    pub fn set_oov_rule_scale(&mut self, value: f32) -> Result<()> {
+        self.set_unk_form_score_scale(value)
+    }
+
+    /// Shortcut for `global_config().unk_form_score_bias` (OOV rule bias).
+    pub fn unk_form_score_bias(&self) -> Result<f32> {
+        Ok(self.global_config()?.unk_form_score_bias)
+    }
+
+    /// Updates only the `unk_form_score_bias` (OOV rule bias) global field.
+    pub fn set_unk_form_score_bias(&mut self, value: f32) -> Result<()> {
+        let mut config = self.global_config()?;
+        config.unk_form_score_bias = value;
+        self.set_global_config(config)
+    }
+
+    /// Shortcut for `global_config().unk_form_score_bias` (`kiwi_config_t.oov_rule_bias`).
+    pub fn oov_rule_bias(&self) -> Result<f32> {
+        self.unk_form_score_bias()
+    }
+
+    /// Updates only the `unk_form_score_bias` (`kiwi_config_t.oov_rule_bias`) global field.
+    pub fn set_oov_rule_bias(&mut self, value: f32) -> Result<()> {
+        self.set_unk_form_score_bias(value)
+    }
+
+    /// Shortcut for `global_config().oov_chr_bias`.
+    pub fn oov_chr_bias(&self) -> Result<f32> {
+        Ok(self.global_config()?.oov_chr_bias)
+    }
+
+    /// Updates only the `oov_chr_bias` global field.
+    pub fn set_oov_chr_bias(&mut self, value: f32) -> Result<()> {
+        let mut config = self.global_config()?;
+        config.oov_chr_bias = value;
+        self.set_global_config(config)
+    }
+
+    /// Shortcut for `global_config().oov_global_weight`.
+    pub fn oov_global_weight(&self) -> Result<f32> {
+        Ok(self.global_config()?.oov_global_weight)
+    }
+
+    /// Updates only the `oov_global_weight` global field.
+    pub fn set_oov_global_weight(&mut self, value: f32) -> Result<()> {
+        let mut config = self.global_config()?;
+        config.oov_global_weight = value;
+        self.set_global_config(config)
+    }
+
+    /// Shortcut for `global_config().oov_local_weight`.
+    pub fn oov_local_weight(&self) -> Result<f32> {
+        Ok(self.global_config()?.oov_local_weight)
+    }
+
+    /// Updates only the `oov_local_weight` global field.
+    pub fn set_oov_local_weight(&mut self, value: f32) -> Result<()> {
+        let mut config = self.global_config()?;
+        config.oov_local_weight = value;
+        self.set_global_config(config)
+    }
+
+    /// Shortcut for `global_config().oov_global_min_freq`.
+    pub fn oov_global_min_freq(&self) -> Result<f32> {
+        Ok(self.global_config()?.oov_global_min_freq)
+    }
+
+    /// Updates only the `oov_global_min_freq` global field.
+    pub fn set_oov_global_min_freq(&mut self, value: f32) -> Result<()> {
+        let mut config = self.global_config()?;
+        config.oov_global_min_freq = value;
         self.set_global_config(config)
     }
 
@@ -2300,7 +2629,7 @@ impl Kiwi {
         options: AnalyzeOptions,
         blocklist: Option<&MorphemeSet>,
     ) -> Result<Vec<AnalysisCandidate>> {
-        self.analyze_with_overrides(text, options, blocklist, None)
+        self.analyze_with_overrides(text, options, blocklist, None, None)
     }
 
     /// Analyzes text with optional pretokenized hints.
@@ -2310,7 +2639,7 @@ impl Kiwi {
         options: AnalyzeOptions,
         pretokenized: Option<&Pretokenized>,
     ) -> Result<Vec<AnalysisCandidate>> {
-        self.analyze_with_overrides(text, options, None, pretokenized)
+        self.analyze_with_overrides(text, options, None, pretokenized, None)
     }
 
     /// Analyzes text with both blocklist and pretokenized hints.
@@ -2321,7 +2650,29 @@ impl Kiwi {
         blocklist: Option<&MorphemeSet>,
         pretokenized: Option<&Pretokenized>,
     ) -> Result<Vec<AnalysisCandidate>> {
-        self.analyze_with_overrides(text, options, blocklist, pretokenized)
+        self.analyze_with_overrides(text, options, blocklist, pretokenized, None)
+    }
+
+    /// Analyzes text with an explicit [`PreparedTypo`] transformer.
+    pub fn analyze_with_typo(
+        &self,
+        text: &str,
+        options: AnalyzeOptions,
+        typo: Option<&PreparedTypo>,
+    ) -> Result<Vec<AnalysisCandidate>> {
+        self.analyze_with_overrides(text, options, None, None, typo)
+    }
+
+    /// Analyzes text with blocklist, pretokenized hints, and an explicit [`PreparedTypo`] transformer.
+    pub fn analyze_with_blocklist_and_pretokenized_and_typo(
+        &self,
+        text: &str,
+        options: AnalyzeOptions,
+        blocklist: Option<&MorphemeSet>,
+        pretokenized: Option<&Pretokenized>,
+        typo: Option<&PreparedTypo>,
+    ) -> Result<Vec<AnalysisCandidate>> {
+        self.analyze_with_overrides(text, options, blocklist, pretokenized, typo)
     }
 
     fn analyze_with_overrides(
@@ -2330,8 +2681,10 @@ impl Kiwi {
         options: AnalyzeOptions,
         blocklist: Option<&MorphemeSet>,
         pretokenized: Option<&Pretokenized>,
+        typo: Option<&PreparedTypo>,
     ) -> Result<Vec<AnalysisCandidate>> {
-        let result = self.analyze_result_with_overrides(text, options, blocklist, pretokenized)?;
+        let result =
+            self.analyze_result_with_overrides(text, options, blocklist, pretokenized, typo)?;
         result.to_vec()
     }
 
@@ -2341,17 +2694,17 @@ impl Kiwi {
         options: AnalyzeOptions,
     ) -> Result<Vec<AnalysisCandidate>> {
         if options.top_n == 1 {
-            let key = AnalyzeCacheKey::from_options(options);
+            let key = AnalyzeCacheKey::from_options(options, self.default_typo_handle_addr());
             if let Some(candidates) = self.lookup_analyze_cache(text, key) {
                 return Ok(candidates);
             }
 
-            let candidates = self.analyze_with_overrides(text, options, None, None)?;
+            let candidates = self.analyze_with_overrides(text, options, None, None, None)?;
             self.insert_analyze_cache(text, key, &candidates);
             return Ok(candidates);
         }
 
-        self.analyze_with_overrides(text, options, None, None)
+        self.analyze_with_overrides(text, options, None, None, None)
     }
 
     fn analyze_result_with_overrides(
@@ -2360,6 +2713,7 @@ impl Kiwi {
         options: AnalyzeOptions,
         blocklist: Option<&MorphemeSet>,
         pretokenized: Option<&Pretokenized>,
+        typo: Option<&PreparedTypo>,
     ) -> Result<KiwiAnalyzeResult> {
         let top_n = options.validated_top_n()?;
         let text_c = CString::new(text)?;
@@ -2401,6 +2755,7 @@ impl Kiwi {
                 .as_ref()
                 .map_or(ptr::null_mut(), |value| value.handle),
         };
+        let typo_transformer = self.resolve_typo_handle(typo)?;
 
         let analyze_option = KiwiAnalyzeOption {
             match_options: options.match_options as c_int,
@@ -2408,8 +2763,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
-            typo_transformer: ptr::null_mut(),
-            typo_threshold: 2.5,
+            typo_transformer,
+            typo_threshold: options.typo_threshold,
         };
 
         clear_kiwi_error(&self.inner.api);
@@ -2448,7 +2803,7 @@ impl Kiwi {
         text: &[u16],
         options: AnalyzeOptions,
     ) -> Result<Vec<AnalysisCandidate>> {
-        self.analyze_utf16_with_overrides(text, options, None, None)
+        self.analyze_utf16_with_overrides(text, options, None, None, None)
     }
 
     /// UTF-16-backed variant of [`Self::analyze_with_blocklist`].
@@ -2458,7 +2813,7 @@ impl Kiwi {
         options: AnalyzeOptions,
         blocklist: Option<&MorphemeSet>,
     ) -> Result<Vec<AnalysisCandidate>> {
-        self.analyze_utf16_with_overrides(text, options, blocklist, None)
+        self.analyze_utf16_with_overrides(text, options, blocklist, None, None)
     }
 
     /// UTF-16-backed variant of [`Self::analyze_with_pretokenized`].
@@ -2468,7 +2823,7 @@ impl Kiwi {
         options: AnalyzeOptions,
         pretokenized: Option<&Pretokenized>,
     ) -> Result<Vec<AnalysisCandidate>> {
-        self.analyze_utf16_with_overrides(text, options, None, pretokenized)
+        self.analyze_utf16_with_overrides(text, options, None, pretokenized, None)
     }
 
     /// UTF-16-backed variant of
@@ -2480,7 +2835,29 @@ impl Kiwi {
         blocklist: Option<&MorphemeSet>,
         pretokenized: Option<&Pretokenized>,
     ) -> Result<Vec<AnalysisCandidate>> {
-        self.analyze_utf16_with_overrides(text, options, blocklist, pretokenized)
+        self.analyze_utf16_with_overrides(text, options, blocklist, pretokenized, None)
+    }
+
+    /// UTF-16-backed variant of [`Self::analyze_with_typo`].
+    pub fn analyze_utf16_with_typo(
+        &self,
+        text: &[u16],
+        options: AnalyzeOptions,
+        typo: Option<&PreparedTypo>,
+    ) -> Result<Vec<AnalysisCandidate>> {
+        self.analyze_utf16_with_overrides(text, options, None, None, typo)
+    }
+
+    /// UTF-16-backed variant of [`Self::analyze_with_blocklist_and_pretokenized_and_typo`].
+    pub fn analyze_utf16_with_blocklist_and_pretokenized_and_typo(
+        &self,
+        text: &[u16],
+        options: AnalyzeOptions,
+        blocklist: Option<&MorphemeSet>,
+        pretokenized: Option<&Pretokenized>,
+        typo: Option<&PreparedTypo>,
+    ) -> Result<Vec<AnalysisCandidate>> {
+        self.analyze_utf16_with_overrides(text, options, blocklist, pretokenized, typo)
     }
 
     fn analyze_utf16_with_overrides(
@@ -2489,9 +2866,10 @@ impl Kiwi {
         options: AnalyzeOptions,
         blocklist: Option<&MorphemeSet>,
         pretokenized: Option<&Pretokenized>,
+        typo: Option<&PreparedTypo>,
     ) -> Result<Vec<AnalysisCandidate>> {
         let result =
-            self.analyze_utf16_result_with_overrides(text, options, blocklist, pretokenized)?;
+            self.analyze_utf16_result_with_overrides(text, options, blocklist, pretokenized, typo)?;
         result.to_vec_utf16()
     }
 
@@ -2501,6 +2879,7 @@ impl Kiwi {
         options: AnalyzeOptions,
         blocklist: Option<&MorphemeSet>,
         pretokenized: Option<&Pretokenized>,
+        typo: Option<&PreparedTypo>,
     ) -> Result<KiwiAnalyzeResult> {
         let analyze_w = require_optional_api(self.inner.api.kiwi_analyze_w, "kiwi_analyze_w")?;
         let top_n = options.validated_top_n()?;
@@ -2541,6 +2920,7 @@ impl Kiwi {
             }
             None => ptr::null_mut(),
         };
+        let typo_transformer = self.resolve_typo_handle(typo)?;
 
         let analyze_option = KiwiAnalyzeOption {
             match_options: options.match_options as c_int,
@@ -2548,8 +2928,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
-            typo_transformer: ptr::null_mut(),
-            typo_threshold: 2.5,
+            typo_transformer,
+            typo_threshold: options.typo_threshold,
         };
 
         clear_kiwi_error(&self.inner.api);
@@ -2650,6 +3030,7 @@ impl Kiwi {
             self.default_analyze_options.with_top_n(1),
             None,
             None,
+            None,
         )?;
         result.first_tokens_utf16()
     }
@@ -2673,12 +3054,12 @@ impl Kiwi {
     }
 
     fn tokenize_with_cache(&self, text: &str, options: AnalyzeOptions) -> Result<Vec<Token>> {
-        let key = TokenizeCacheKey::from_options(options);
+        let key = TokenizeCacheKey::from_options(options, self.default_typo_handle_addr());
         if let Some(tokens) = self.lookup_tokenize_cache(text, key) {
             return Ok(tokens);
         }
 
-        let result = self.analyze_result_with_overrides(text, options, None, None)?;
+        let result = self.analyze_result_with_overrides(text, options, None, None, None)?;
         let tokens = result.first_tokens()?;
 
         self.insert_tokenize_cache(text, key, &tokens);
@@ -2694,7 +3075,7 @@ impl Kiwi {
         blocklist: Option<&MorphemeSet>,
     ) -> Result<Vec<Token>> {
         let result =
-            self.analyze_result_with_overrides(text, options.with_top_n(1), blocklist, None)?;
+            self.analyze_result_with_overrides(text, options.with_top_n(1), blocklist, None, None)?;
         result.first_tokens()
     }
 
@@ -2705,8 +3086,13 @@ impl Kiwi {
         options: AnalyzeOptions,
         pretokenized: Option<&Pretokenized>,
     ) -> Result<Vec<Token>> {
-        let result =
-            self.analyze_result_with_overrides(text, options.with_top_n(1), None, pretokenized)?;
+        let result = self.analyze_result_with_overrides(
+            text,
+            options.with_top_n(1),
+            None,
+            pretokenized,
+            None,
+        )?;
         result.first_tokens()
     }
 
@@ -2723,6 +3109,38 @@ impl Kiwi {
             options.with_top_n(1),
             blocklist,
             pretokenized,
+            None,
+        )?;
+        result.first_tokens()
+    }
+
+    /// Tokenizes with an explicit [`PreparedTypo`] transformer.
+    pub fn tokenize_with_typo(
+        &self,
+        text: &str,
+        options: AnalyzeOptions,
+        typo: Option<&PreparedTypo>,
+    ) -> Result<Vec<Token>> {
+        let result =
+            self.analyze_result_with_overrides(text, options.with_top_n(1), None, None, typo)?;
+        result.first_tokens()
+    }
+
+    /// Tokenizes with blocklist, pretokenized hints, and an explicit [`PreparedTypo`] transformer.
+    pub fn tokenize_with_blocklist_and_pretokenized_and_typo(
+        &self,
+        text: &str,
+        options: AnalyzeOptions,
+        blocklist: Option<&MorphemeSet>,
+        pretokenized: Option<&Pretokenized>,
+        typo: Option<&PreparedTypo>,
+    ) -> Result<Vec<Token>> {
+        let result = self.analyze_result_with_overrides(
+            text,
+            options.with_top_n(1),
+            blocklist,
+            pretokenized,
+            typo,
         )?;
         result.first_tokens()
     }
@@ -2737,7 +3155,7 @@ impl Kiwi {
             .default_analyze_options
             .with_top_n(1)
             .with_match_options(match_options);
-        let result = self.analyze_utf16_result_with_overrides(text, options, None, None)?;
+        let result = self.analyze_utf16_result_with_overrides(text, options, None, None, None)?;
         result.first_tokens_utf16()
     }
 
@@ -2747,8 +3165,13 @@ impl Kiwi {
         text: &[u16],
         options: AnalyzeOptions,
     ) -> Result<Vec<Token>> {
-        let result =
-            self.analyze_utf16_result_with_overrides(text, options.with_top_n(1), None, None)?;
+        let result = self.analyze_utf16_result_with_overrides(
+            text,
+            options.with_top_n(1),
+            None,
+            None,
+            None,
+        )?;
         result.first_tokens_utf16()
     }
 
@@ -2759,8 +3182,13 @@ impl Kiwi {
         options: AnalyzeOptions,
         blocklist: Option<&MorphemeSet>,
     ) -> Result<Vec<Token>> {
-        let result =
-            self.analyze_utf16_result_with_overrides(text, options.with_top_n(1), blocklist, None)?;
+        let result = self.analyze_utf16_result_with_overrides(
+            text,
+            options.with_top_n(1),
+            blocklist,
+            None,
+            None,
+        )?;
         result.first_tokens_utf16()
     }
 
@@ -2776,6 +3204,7 @@ impl Kiwi {
             options.with_top_n(1),
             None,
             pretokenized,
+            None,
         )?;
         result.first_tokens_utf16()
     }
@@ -2794,6 +3223,43 @@ impl Kiwi {
             options.with_top_n(1),
             blocklist,
             pretokenized,
+            None,
+        )?;
+        result.first_tokens_utf16()
+    }
+
+    /// UTF-16-backed variant of [`Self::tokenize_with_typo`].
+    pub fn tokenize_utf16_with_typo(
+        &self,
+        text: &[u16],
+        options: AnalyzeOptions,
+        typo: Option<&PreparedTypo>,
+    ) -> Result<Vec<Token>> {
+        let result = self.analyze_utf16_result_with_overrides(
+            text,
+            options.with_top_n(1),
+            None,
+            None,
+            typo,
+        )?;
+        result.first_tokens_utf16()
+    }
+
+    /// UTF-16-backed variant of [`Self::tokenize_with_blocklist_and_pretokenized_and_typo`].
+    pub fn tokenize_utf16_with_blocklist_and_pretokenized_and_typo(
+        &self,
+        text: &[u16],
+        options: AnalyzeOptions,
+        blocklist: Option<&MorphemeSet>,
+        pretokenized: Option<&Pretokenized>,
+        typo: Option<&PreparedTypo>,
+    ) -> Result<Vec<Token>> {
+        let result = self.analyze_utf16_result_with_overrides(
+            text,
+            options.with_top_n(1),
+            blocklist,
+            pretokenized,
+            typo,
         )?;
         result.first_tokens_utf16()
     }
@@ -2827,11 +3293,12 @@ impl Kiwi {
     {
         let analyze_m = require_optional_api(self.inner.api.kiwi_analyze_m, "kiwi_analyze_m")?;
         let top_n = options.validated_top_n()?;
+        let typo_transformer = self.resolve_typo_handle(None)?;
 
         let lines: Vec<S> = texts.into_iter().collect();
         let line_count = lines.len();
-        let analyze_cache_key =
-            (options.top_n == 1).then(|| AnalyzeCacheKey::from_options(options));
+        let analyze_cache_key = (options.top_n == 1)
+            .then(|| AnalyzeCacheKey::from_options(options, self.default_typo_handle_addr()));
         let line_texts_for_cache = analyze_cache_key.map(|_| {
             lines
                 .iter()
@@ -2873,8 +3340,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
-            typo_transformer: ptr::null_mut(),
-            typo_threshold: 2.5,
+            typo_transformer,
+            typo_threshold: options.typo_threshold,
         };
 
         clear_kiwi_error(&self.inner.api);
@@ -2927,6 +3394,7 @@ impl Kiwi {
     {
         let analyze_mw = require_optional_api(self.inner.api.kiwi_analyze_mw, "kiwi_analyze_mw")?;
         let top_n = options.validated_top_n()?;
+        let typo_transformer = self.resolve_typo_handle(None)?;
 
         let lines: Vec<Vec<u16>> = texts.into_iter().collect();
         let line_count = lines.len();
@@ -2946,8 +3414,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
-            typo_transformer: ptr::null_mut(),
-            typo_threshold: 2.5,
+            typo_transformer,
+            typo_threshold: options.typo_threshold,
         };
 
         clear_kiwi_error(&self.inner.api);
@@ -2993,7 +3461,7 @@ impl Kiwi {
     {
         let lines: Vec<S> = texts.into_iter().collect();
         let options = self.default_analyze_options.with_top_n(1);
-        let cache_key = TokenizeCacheKey::from_options(options);
+        let cache_key = TokenizeCacheKey::from_options(options, self.default_typo_handle_addr());
 
         if !self.re_word_rules.borrow().is_empty() {
             let mut out = Vec::with_capacity(lines.len());
@@ -3040,11 +3508,12 @@ impl Kiwi {
     {
         let analyze_m = require_optional_api(self.inner.api.kiwi_analyze_m, "kiwi_analyze_m")?;
         let top_n = options.validated_top_n()?;
+        let typo_transformer = self.resolve_typo_handle(None)?;
 
         let lines: Vec<S> = texts.into_iter().collect();
         let line_count = lines.len();
-        let tokenize_cache_key =
-            (options.top_n == 1).then(|| TokenizeCacheKey::from_options(options));
+        let tokenize_cache_key = (options.top_n == 1)
+            .then(|| TokenizeCacheKey::from_options(options, self.default_typo_handle_addr()));
         let line_texts_for_cache = tokenize_cache_key.map(|_| {
             lines
                 .iter()
@@ -3067,8 +3536,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
-            typo_transformer: ptr::null_mut(),
-            typo_threshold: 2.5,
+            typo_transformer,
+            typo_threshold: options.typo_threshold,
         };
 
         clear_kiwi_error(&self.inner.api);
@@ -3149,6 +3618,38 @@ impl Kiwi {
         ))
     }
 
+    /// Restores spacing via the native `kiwi_space` and `kiwi_free_string` C APIs.
+    pub fn space_via_native(&self, text: &str, reset_whitespace: bool) -> Result<String> {
+        let space_fn = require_optional_api(self.inner.api.kiwi_space, "kiwi_space")?;
+        let free_fn = require_optional_api(self.inner.api.kiwi_free_string, "kiwi_free_string")?;
+        let text_c = CString::new(text)?;
+
+        clear_kiwi_error(&self.inner.api);
+        let pointer = unsafe {
+            space_fn(
+                self.handle,
+                text_c.as_ptr(),
+                if reset_whitespace { 1 } else { 0 },
+            )
+        };
+        if pointer.is_null() {
+            return Err(api_error(
+                &self.inner.api,
+                "kiwi_space returned a null pointer",
+            ));
+        }
+
+        let spaced = cstr_to_string(pointer);
+        let free_result = unsafe { free_fn(pointer) };
+        if free_result != 0 {
+            return Err(api_error(
+                &self.inner.api,
+                "kiwi_free_string returned an error",
+            ));
+        }
+        Ok(spaced)
+    }
+
     /// Applies [`Self::space`] to multiple inputs.
     pub fn space_many<I, S>(&self, texts: I, reset_whitespace: bool) -> Result<Vec<String>>
     where
@@ -3201,6 +3702,112 @@ impl Kiwi {
         S: AsRef<str>,
     {
         Ok(self.glue_with_options(text_chunks, None, false)?.0)
+    }
+
+    /// Glues adjacent text chunks via the native `kiwi_glue` and `kiwi_free_string` C APIs.
+    pub fn glue_via_native<S>(&self, text_chunks: &[S]) -> Result<String>
+    where
+        S: AsRef<str>,
+    {
+        Ok(self
+            .glue_with_options_via_native(text_chunks, None, false)?
+            .0)
+    }
+
+    /// Advanced chunk glue API via the native `kiwi_glue` and `kiwi_free_string` C APIs.
+    pub fn glue_with_options_via_native<S>(
+        &self,
+        text_chunks: &[S],
+        insert_new_lines: Option<&[bool]>,
+        return_space_insertions: bool,
+    ) -> Result<(String, Option<Vec<bool>>)>
+    where
+        S: AsRef<str>,
+    {
+        let glue_fn = require_optional_api(self.inner.api.kiwi_glue, "kiwi_glue")?;
+        let free_fn = require_optional_api(self.inner.api.kiwi_free_string, "kiwi_free_string")?;
+
+        if text_chunks.len() > c_int::MAX as usize {
+            return Err(KiwiError::InvalidArgument(format!(
+                "text_chunks length must be <= {}",
+                c_int::MAX
+            )));
+        }
+
+        if let Some(new_lines) = insert_new_lines {
+            if new_lines.len() != text_chunks.len().saturating_sub(1) {
+                return Err(KiwiError::InvalidArgument(format!(
+                    "insert_new_lines length must be {}",
+                    text_chunks.len().saturating_sub(1)
+                )));
+            }
+        }
+
+        if text_chunks.is_empty() {
+            return Ok((
+                String::new(),
+                if return_space_insertions {
+                    Some(Vec::new())
+                } else {
+                    None
+                },
+            ));
+        }
+
+        let chunks_c: Vec<CString> = text_chunks
+            .iter()
+            .map(|chunk| CString::new(chunk.as_ref()))
+            .collect::<std::result::Result<_, _>>()?;
+        let chunk_ptrs: Vec<*const c_char> = chunks_c.iter().map(|chunk| chunk.as_ptr()).collect();
+
+        let join_count = text_chunks.len().saturating_sub(1);
+        let new_lines_c: Option<Vec<c_char>> = insert_new_lines.map(|flags| {
+            flags
+                .iter()
+                .map(|&flag| if flag { 1 as c_char } else { 0 as c_char })
+                .collect()
+        });
+        let mut space_insertions_c: Option<Vec<c_char>> =
+            return_space_insertions.then(|| vec![0 as c_char; join_count]);
+
+        clear_kiwi_error(&self.inner.api);
+        let pointer = unsafe {
+            glue_fn(
+                self.handle,
+                chunk_ptrs.as_ptr(),
+                chunk_ptrs.len() as c_int,
+                new_lines_c
+                    .as_ref()
+                    .map_or(ptr::null(), |flags| flags.as_ptr()),
+                space_insertions_c
+                    .as_mut()
+                    .map_or(ptr::null_mut(), |flags| flags.as_mut_ptr()),
+            )
+        };
+        if pointer.is_null() {
+            return Err(api_error(
+                &self.inner.api,
+                "kiwi_glue returned a null pointer",
+            ));
+        }
+
+        let glued = cstr_to_string(pointer);
+        let free_result = unsafe { free_fn(pointer) };
+        if free_result != 0 {
+            return Err(api_error(
+                &self.inner.api,
+                "kiwi_free_string returned an error",
+            ));
+        }
+
+        let space_insertions = space_insertions_c.map(|flags| {
+            flags
+                .into_iter()
+                .map(|flag| flag != 0)
+                .collect::<Vec<bool>>()
+        });
+
+        Ok((glued, space_insertions))
     }
 
     /// Advanced chunk glue API with newline control and optional insertion report.
@@ -3341,6 +3948,7 @@ impl Kiwi {
     {
         let analyze_m = require_optional_api(self.inner.api.kiwi_analyze_m, "kiwi_analyze_m")?;
         let top_n = options.validated_top_n()?;
+        let typo_transformer = self.resolve_typo_handle(None)?;
 
         // For scoring we just need top-1 usually, but let's respect options
         let line_count = texts.len();
@@ -3357,8 +3965,8 @@ impl Kiwi {
             open_ending: if options.open_ending { 1 } else { 0 },
             allowed_dialects: options.allowed_dialects as c_int,
             dialect_cost: options.dialect_cost,
-            typo_transformer: ptr::null_mut(),
-            typo_threshold: 2.5,
+            typo_transformer,
+            typo_threshold: options.typo_threshold,
         };
 
         clear_kiwi_error(&self.inner.api);
@@ -5461,7 +6069,7 @@ fn is_space_insertable_prev(tag: &str) -> bool {
 }
 
 fn should_insert_space_between(prev_tag: &str, tag: &str, form: &str) -> bool {
-    if tag == "VX" && (form == "하" || form == "지") {
+    if tag == "VX" && (form == "하" || form == "지" || form == "하지") {
         return false;
     }
 
@@ -5475,7 +6083,7 @@ fn should_strip_gap(prev_tag: Option<&str>, tag: &str, form: &str) -> bool {
     tag.starts_with('E')
         || tag.starts_with('J')
         || tag.starts_with("XS")
-        || (tag == "VX" && (form == "하" || form == "지"))
+        || (tag == "VX" && (form == "하" || form == "지" || form == "하지"))
         || (prev_tag == Some("SN") && tag == "NNB")
 }
 
@@ -5836,9 +6444,11 @@ mod runtime_tests {
         assert!(should_insert_space_between("SF", "NP", "나"));
         assert!(!should_insert_space_between("NNG", "VX", "하"));
         assert!(!should_insert_space_between("NNG", "VX", "지"));
+        assert!(!should_insert_space_between("NNG", "VX", "하지"));
 
         assert!(should_strip_gap(Some("SN"), "NNB", "개"));
         assert!(should_strip_gap(None, "JKS", "가"));
+        assert!(should_strip_gap(Some("NNG"), "VX", "하지"));
         assert!(!should_strip_gap(Some("NNG"), "NNG", "사과"));
     }
 

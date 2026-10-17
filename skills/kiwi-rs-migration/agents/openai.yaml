@@ -1,0 +1,7 @@
+interface:
+  display_name: "Kiwi-rs Migration Assistant"
+  short_description: "Translate Python kiwipiepy code to idiomatic Rust kiwi-rs"
+  default_prompt: "Use $kiwi-rs-migration to port my Python kiwipiepy code to Rust kiwi-rs."
+
+policy:
+  allow_implicit_invocation: true

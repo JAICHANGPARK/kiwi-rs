@@ -16,6 +16,7 @@ fn analyze_options_default_is_reasonable() {
     assert_eq!(options.match_options, KIWI_MATCH_ALL_WITH_NORMALIZING);
     assert!(!options.open_ending);
     assert_eq!(options.allowed_dialects, KIWI_DIALECT_STANDARD);
+    assert!((options.typo_threshold - 2.5).abs() < 1e-6);
 }
 
 #[test]
@@ -31,13 +32,18 @@ fn analyze_options_builder_methods_update_fields() {
         .with_match_options(42)
         .with_open_ending(true)
         .with_allowed_dialects(7)
-        .with_dialect_cost(1.25);
+        .with_dialect_cost(1.25)
+        .with_typo_threshold(3.5);
 
     assert_eq!(options.top_n, 3);
     assert_eq!(options.match_options, 42);
     assert!(options.open_ending);
     assert_eq!(options.allowed_dialects, 7);
     assert_eq!(options.dialect_cost, 1.25);
+    assert_eq!(options.typo_threshold, 3.5);
+
+    let options_alias = options.with_typo_cost_threshold(4.0);
+    assert_eq!(options_alias.typo_threshold, 4.0);
 }
 
 #[test]
@@ -54,6 +60,7 @@ fn typo_constants_are_stable() {
     assert_eq!(KIWI_TYPO_WITHOUT_TYPO, 0);
     assert_eq!(KIWI_TYPO_BASIC_TYPO_SET, 1);
     assert_eq!(KIWI_TYPO_CONTINUAL_TYPO_SET, 2);
+    assert_eq!(KIWI_TYPO_DIALECT, 6);
 }
 
 #[test]

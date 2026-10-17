@@ -51,6 +51,8 @@ pub struct AnalyzeOptions {
     pub allowed_dialects: i32,
     /// Penalty used when selecting dialectal analyses.
     pub dialect_cost: f32,
+    /// Cost threshold used when a typo transformer is applied during analysis.
+    pub typo_threshold: f32,
 }
 
 impl Default for AnalyzeOptions {
@@ -61,6 +63,7 @@ impl Default for AnalyzeOptions {
             open_ending: false,
             allowed_dialects: KIWI_DIALECT_STANDARD,
             dialect_cost: 3.0,
+            typo_threshold: 2.5,
         }
     }
 }
@@ -94,6 +97,17 @@ impl AnalyzeOptions {
     pub fn with_dialect_cost(mut self, dialect_cost: f32) -> Self {
         self.dialect_cost = dialect_cost;
         self
+    }
+
+    /// Sets the typo cost threshold used when typo correction is active.
+    pub fn with_typo_threshold(mut self, typo_threshold: f32) -> Self {
+        self.typo_threshold = typo_threshold;
+        self
+    }
+
+    /// Alias for [`Self::with_typo_threshold`].
+    pub fn with_typo_cost_threshold(self, typo_cost_threshold: f32) -> Self {
+        self.with_typo_threshold(typo_cost_threshold)
     }
 
     pub(crate) fn validated_top_n(&self) -> Result<c_int> {

@@ -48,18 +48,19 @@ Accuracy checks you should ask AI to follow:
 - Check `supports_analyze_mw()` before `analyze_many_utf16_via_native`.
 - Do not assume full `kiwipiepy` parity (see `docs/kiwipiepy_parity.md`).
 
-### Skill-based usage (`skills/`)
+### Skill-based usage (`skills/` & `.agents/skills.json`)
 
-This repository includes a local AI skill for `kiwi-rs`:
+This repository includes built-in AI skills for `kiwi-rs` (automatically discovered via `.agents/skills.json`):
 
-- Skill file: `skills/kiwi-rs-assistant/SKILL.md`
-- Reference docs: `skills/kiwi-rs-assistant/references/`
-- Agent metadata: `skills/kiwi-rs-assistant/agents/openai.yaml`
+- **`kiwi-rs-assistant`** (`skills/kiwi-rs-assistant/SKILL.md`): End-to-end Rust Korean NLP code generation, copy-paste recipes (`references/recipes.md`), task-to-API routing (`references/task-to-api.md`), and runtime troubleshooting (`references/troubleshooting.md`).
+- **`kiwi-rs-migration`** (`skills/kiwi-rs-migration/SKILL.md`): Side-by-side Python `kiwipiepy` to Rust `kiwi-rs` migration guide (`references/kiwipiepy-mapping.md`).
+- Agent metadata: `skills/*/agents/openai.yaml`
 
 If your assistant supports skill invocation, call it explicitly:
 
 ```text
 Use $kiwi-rs-assistant and implement: <your task>
+Use $kiwi-rs-migration to port this Python kiwipiepy code to Rust: <your code>
 ```
 
 ### `llms.txt` usage
@@ -75,10 +76,10 @@ Read llms.txt first, then answer using repository APIs and examples only.
 
 ## Current support status
 
-As of February 16, 2026:
+As of October 2026 (Kiwi `v0.24.0` / upstream `HEAD`):
 
-- C API symbol loading: complete (`101/101` symbols in `capi.h` are loaded)
-- Core high-level usage: implemented (`init/new/from_config`, `analyze/tokenize/split/join`, `MorphemeSet`, `Pretokenized`, typo APIs, `SwTokenizer`, CoNg APIs)
+- C API symbol loading: complete (`106/106` symbols in `capi.h` are loaded)
+- Core high-level usage: implemented (`init/new/from_config`, `analyze/tokenize/split/join`, `space/glue` native & Rust paths, `MorphemeSet`, `Pretokenized`, typo & `PreparedTypo` APIs, `SwTokenizer`, CoNg APIs)
 - kiwipiepy full surface parity: partial (Python/C++-specific layers still missing)
 
 ## Installation
@@ -166,16 +167,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Core
 
-- Initialization: `Kiwi::init`, `Kiwi::new`, `Kiwi::from_config`, `Kiwi::init_direct`
+- Initialization: `Kiwi::init`, `Kiwi::new`, `Kiwi::from_config`, `Kiwi::init_direct`, `Kiwi::init_direct_with_dialects`
 - Analyze/tokenize: `analyze*`, `tokenize*`, `analyze_many*`, `tokenize_many*`
 - Sentence split: `split_into_sents*`, `split_into_sents_with_options*`
-- Join/spacing: `join*`, `space*`, `glue*`
+- Join/spacing: `join*`, `space*`, `space_via_native`, `glue*`, `glue_via_native`, `glue_with_options_via_native`
 
 ### Advanced
 
-- Builder: user words, alias words, pre-analyzed words, dictionary loading, regex rules, extract APIs
+- Builder: user words (`add_user_word`, `add_user_word_with_def`), alias words (`add_alias_word`, `add_alias_word_with_def`), pre-analyzed words, dictionary loading, regex rules, extract APIs
 - Constraints: `MorphemeSet`, `Pretokenized`
-- Typo: `KiwiTypo`, default typo sets, cost controls
+- Typo: `KiwiTypo`, `PreparedTypo`, default typo sets (`KIWI_TYPO_DIALECT`, etc.), runtime typo analysis (`analyze_with_typo`, `tokenize_with_typo`, `set_default_prepared_typo`), cost controls
 - Subword: `SwTokenizer`
 - CoNg: similarity/context/prediction/context-id conversion
 
@@ -184,6 +185,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - `Kiwi::supports_utf16_api`
 - `Kiwi::supports_analyze_mw`
 - `KiwiLibrary::supports_builder_init_stream`
+- `Kiwi::supports_builder_word_with_def` / `KiwiLibrary::supports_builder_word_with_def`
+- `Kiwi::supports_typo_prepare` / `KiwiLibrary::supports_typo_prepare`
+- `Kiwi::supports_native_space_and_glue` / `KiwiLibrary::supports_native_space_and_glue`
 
 ## Supported APIs
 
@@ -191,20 +195,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 The main struct for analysis.
 
-- **Initialization**: `init`, `init_with_version`, `new`, `from_config`, `init_direct`, `with_model_path`
-- **Analysis**: `analyze`, `analyze_top_n`, `analyze_with_options`, `analyze_with_blocklist`, `analyze_with_pretokenized`, `analyze_with_blocklist_and_pretokenized`
-- **Tokenization**: `tokenize`, `tokenize_with_match_options`, `tokenize_with_options`, `tokenize_with_blocklist`, `tokenize_with_pretokenized`, `tokenize_with_blocklist_and_pretokenized`
+- **Initialization**: `init`, `init_with_version`, `new`, `from_config`, `init_direct`, `init_direct_with_dialects`, `with_model_path`
+- **Analysis**: `analyze`, `analyze_top_n`, `analyze_with_options`, `analyze_with_typo`, `analyze_with_blocklist`, `analyze_with_pretokenized`, `analyze_with_blocklist_and_pretokenized`, `analyze_with_blocklist_and_pretokenized_and_typo`
+- **Tokenization**: `tokenize`, `tokenize_with_match_options`, `tokenize_with_options`, `tokenize_with_typo`, `tokenize_with_blocklist`, `tokenize_with_pretokenized`, `tokenize_with_blocklist_and_pretokenized`, `tokenize_with_blocklist_and_pretokenized_and_typo`
 - **Multi-string Analysis**: `analyze_many_with_options`, `analyze_many_via_native`, `tokenize_many`, `tokenize_many_with_echo`
 - **Sentence Splitting**: `split_into_sents`, `split_into_sents_with_options`
-- **Spacing/Joining**: `space`, `space_many`, `glue`, `glue_with_options`, `join`, `prepare_join_morphs`, `prepare_join_tokens`, `prepare_joiner`, `join_prepared`, `join_prepared_utf16`
+- **Spacing/Joining**: `space`, `space_via_native`, `space_many`, `glue`, `glue_via_native`, `glue_with_options`, `glue_with_options_via_native`, `join`, `prepare_join_morphs`, `prepare_join_tokens`, `prepare_joiner`, `join_prepared`, `join_prepared_utf16`
 - **Configuration**:
     - `global_config`, `set_global_config`
     - `set_option`, `get_option`, `set_option_f`, `get_option_f`
     - `cutoff_threshold`, `set_cutoff_threshold`
     - `integrate_allomorph`, `set_integrate_allomorph`
     - `space_penalty`, `set_space_penalty`, `space_tolerance`, `set_space_tolerance`
-    - `max_unk_form_size`, `set_max_unk_form_size`
+    - `max_unk_form_size`, `set_max_unk_form_size`, `max_unk_form_size_followed_by_j_class`, `set_max_unk_form_size_followed_by_j_class`
     - `typo_cost_weight`, `set_typo_cost_weight`
+    - `unk_form_score_scale` (`oov_rule_scale`), `set_unk_form_score_scale` (`set_oov_rule_scale`), `unk_form_score_bias` (`oov_rule_bias`), `set_unk_form_score_bias` (`set_oov_rule_bias`)
+    - `oov_chr_bias`, `set_oov_chr_bias`, `oov_global_weight`, `set_oov_global_weight`, `oov_local_weight`, `set_oov_local_weight`, `oov_global_min_freq`, `set_oov_global_min_freq`
+    - `default_prepared_typo`, `set_default_prepared_typo`
 - **Morpheme/Sense Info**: `morpheme`, `morpheme_info`, `morpheme_form`, `list_senses`, `tag_to_string`, `script_name`, `list_all_scripts`
 - **Search**: `find_morphemes`, `find_morphemes_with_prefix`
 - **Semantics (CoNg)**:
@@ -221,17 +228,17 @@ The main struct for analysis.
 
 Used to customize the dictionary and build a `Kiwi` instance.
 
-- **Build**: `build`, `build_with_default_options`
-- **Word Management**: `add_user_word`, `add_pre_analyzed_word`, `add_rule`, `add_re_rule`, `add_alias`, `add_automata`
+- **Build**: `build`, `build_with_default_options`, `build_with_typo_and_default_options`
+- **Word Management**: `add_user_word`, `add_user_word_with_def`, `add_pre_analyzed_word`, `add_rule`, `add_re_rule`, `add_alias_word`, `add_alias_word_with_def`, `add_automata`
 - **Dictionary Loading**: `load_dictionary`, `load_user_dictionary`, `extract_add_words`
 - **Configuration**: `set_option`, `get_option`, `set_option_f`, `get_option_f`, `set_cut_off_threshold`, `set_integrate_allomorph`, `set_model_path`
 
-### KiwiTypo
+### KiwiTypo / PreparedTypo
 
 Corrects typos in text.
 
 - **Creation**: `Kiwi::typo`, `Kiwi::basic_typo`, `Kiwi::default_typo_set`
-- **Management**: `add`, `update`, `scale_cost`, `set_continual_typo_cost`, `set_lengthening_typo_cost`, `copy`
+- **Management**: `add`, `update`, `scale_cost`, `set_continual_typo_cost`, `set_lengthening_typo_cost`, `copy`, `prepare`
 
 ### SwTokenizer
 

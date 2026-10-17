@@ -1,12 +1,12 @@
 # kiwipiepy parity status for kiwi-rs
 
-Snapshot date: 2026-02-17
+Snapshot date: 2026-10-17
 
 Validation baseline:
 
-- `kiwipiepy==0.22.2` runtime API inspection (`dir(kiwipiepy.Kiwi)` and package symbols).
-- `kiwi-rs` source (`src/runtime.rs`, `src/types.rs`, `src/native.rs`) at `v0.1.4`.
-- C API loader table in `src/native.rs` (`KiwiApi` fields: `101`, `load_symbol*` calls: `101`).
+- `kiwipiepy` / upstream Kiwi `v0.24.0` (`HEAD`) runtime and C API inspection (`include/kiwi/capi.h`).
+- `kiwi-rs` source (`src/runtime.rs`, `src/types.rs`, `src/native.rs`, `src/constants.rs`, `src/model.rs`).
+- C API loader table in `src/native.rs` (`KiwiApi` fields: `106`, `load_symbol*` calls: `106`).
 
 ## Legend
 
@@ -16,7 +16,7 @@ Validation baseline:
 
 ## Progress by layer
 
-1. C API coverage: `complete` (`101/101` loader entries in `src/native.rs`).
+1. C API coverage: `complete` (`106/106` loader entries in `src/native.rs`).
 2. High-level Rust API coverage: `strong` for core NLP workflows.
 3. Full `kiwipiepy` parity: `partial`.
 
@@ -24,15 +24,15 @@ Validation baseline:
 
 | kiwipiepy API | status | kiwi-rs API / note |
 |---|---|---|
-| `Kiwi.add_user_word` | Partial | `KiwiBuilder::add_user_word` (builder-time API) |
+| `Kiwi.add_user_word` | Partial | `KiwiBuilder::add_user_word`, `KiwiBuilder::add_user_word_with_def`, `KiwiBuilder::add_alias_word`, `KiwiBuilder::add_alias_word_with_def` (builder-time API) |
 | `Kiwi.add_pre_analyzed_word` | Partial | `KiwiBuilder::add_pre_analyzed_word` (builder-time API) |
 | `Kiwi.load_user_dictionary` | Partial | `KiwiBuilder::load_user_dictionary` (builder-time API) |
 | `Kiwi.add_rule` | Partial | `KiwiBuilder::add_rule` (builder-time API) |
 | `Kiwi.add_re_rule` | Partial | `KiwiBuilder::add_re_rule` (builder-time API); not Python `re.sub`-compatible in all edge cases |
 | `Kiwi.add_re_word` | Partial | `Kiwi::add_re_word(pattern, tag)`; callback/user_value variant is not exposed |
 | `Kiwi.clear_re_words` | Equivalent | `Kiwi::clear_re_words` |
-| `Kiwi.analyze` | Partial | `Kiwi::analyze*`, `Kiwi::analyze_many_with_options`, `Kiwi::analyze_many_via_native` |
-| `Kiwi.tokenize` | Partial | `Kiwi::tokenize*`, blocklist/pretokenized variants, batch variants; no `Stopwords` helper type |
+| `Kiwi.analyze` | Partial | `Kiwi::analyze*`, `Kiwi::analyze_with_typo`, `Kiwi::analyze_many_with_options`, `Kiwi::analyze_many_via_native` |
+| `Kiwi.tokenize` | Partial | `Kiwi::tokenize*`, `Kiwi::tokenize_with_typo`, blocklist/pretokenized variants, batch variants; no `Stopwords` helper type |
 | `Kiwi.split_into_sents` | Partial | `split_into_sents*`, `split_into_sents_with_options*`; Python namedtuple surface is different |
 
 ## Runtime config and metadata
@@ -40,10 +40,10 @@ Validation baseline:
 | kiwipiepy API | status | kiwi-rs API / note |
 |---|---|---|
 | `Kiwi.global_config` | Equivalent | `Kiwi::global_config`, `Kiwi::set_global_config` |
-| deprecated properties (`cutoff_threshold`, etc.) | Equivalent | method-style Rust API (`cutoff_threshold`, `set_cutoff_threshold`, ...) |
+| deprecated properties (`cutoff_threshold`, etc.) | Equivalent | method-style Rust API (`cutoff_threshold`, `set_cutoff_threshold`, OOV rule/chr/global/local shortcuts, ...) |
 | `Kiwi.num_workers` | Equivalent | `Kiwi::num_workers` |
 | `Kiwi.model_type` | Equivalent | `Kiwi::model_type` |
-| `Kiwi.typo_cost_threshold` | Equivalent | `Kiwi::typo_cost_threshold` |
+| `Kiwi.typo_cost_threshold` | Equivalent | `Kiwi::typo_cost_threshold`, `AnalyzeOptions::with_typo_threshold` |
 | `Kiwi.list_senses` | Equivalent | `Kiwi::list_senses` |
 | `Kiwi.list_all_scripts` | Equivalent | `Kiwi::list_all_scripts` |
 | `Kiwi.morpheme` | Partial | `Kiwi::morpheme(morph_id)` is ID-based |
@@ -54,8 +54,8 @@ Validation baseline:
 | kiwipiepy API | status | kiwi-rs API / note |
 |---|---|---|
 | `Kiwi.join` | Partial | `Kiwi::join`; `return_positions`-style output is unavailable |
-| `Kiwi.space` | Partial | `Kiwi::space`, `Kiwi::space_many`; Rust-side heuristics |
-| `Kiwi.glue` | Partial | `Kiwi::glue`, `Kiwi::glue_with_options` |
+| `Kiwi.space` | Equivalent | `Kiwi::space`, `Kiwi::space_via_native` (`kiwi_space`), `Kiwi::space_many` |
+| `Kiwi.glue` | Equivalent | `Kiwi::glue`, `Kiwi::glue_with_options`, `Kiwi::glue_via_native`, `Kiwi::glue_with_options_via_native` (`kiwi_glue`) |
 | `Kiwi.template` | Unavailable | Python template layer, no matching C API |
 
 ## CoNg semantic APIs
@@ -83,7 +83,7 @@ Validation baseline:
 
 | kiwipiepy surface | status in kiwi-rs | note |
 |---|---|---|
-| `TypoTransformer`, `TypoDefinition` presets | Partial | `KiwiTypo` exists, but Python class shape/presets are different |
+| `TypoTransformer`, `TypoDefinition` presets | Partial | `KiwiTypo`, `PreparedTypo` (`KiwiTypo::prepare`), and `KIWI_TYPO_*` presets exist; Python class shape differs |
 | `HSDataset` | Unavailable | dataset class is Python/C++ layer |
 | `NgramExtractor` | Unavailable | no C API endpoint |
 | `Template` / `Kiwi.template` | Unavailable | Python template layer |

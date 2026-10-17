@@ -13,7 +13,7 @@ dependencies = [
 
 [[package]]
 name = "kiwi-rs"
-version = "2026.8.26"
+version = "2026.10.17"
 dependencies = [
  "regex",
 ]

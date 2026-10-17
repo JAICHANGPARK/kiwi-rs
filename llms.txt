@@ -1,12 +1,16 @@
 # kiwi-rs
 
-Rust bindings for Kiwi via the official C API (`include/kiwi/capi.h`).
+Rust bindings for Kiwi via the official C API (`include/kiwi/capi.h`, `106/106` symbols aligned with Kiwi `v0.24.0`).
 
 Primary docs:
 - README (English): `README.md`
 - README (Korean): `README.ko.md`
 - kiwipiepy parity (English): `docs/kiwipiepy_parity.md`
 - kiwipiepy parity (Korean): `docs/kiwipiepy_parity.ko.md`
+
+AI Skills (auto-discovered via `.agents/skills.json`):
+- `skills/kiwi-rs-assistant/SKILL.md`: End-to-end Rust Korean NLP code generation, recipes (`references/recipes.md`), API routing (`references/task-to-api.md`), and troubleshooting (`references/troubleshooting.md`).
+- `skills/kiwi-rs-migration/SKILL.md`: Translating Python `kiwipiepy` codebases to idiomatic Rust `kiwi-rs` (`references/kiwipiepy-mapping.md`).
 
 Core crate entry:
 - `src/lib.rs`
@@ -16,6 +20,8 @@ Initialization paths:
 - `Kiwi::init()` for automatic bootstrap (local first, then cached download)
 - `Kiwi::new()` for env-based paths (`KIWI_LIBRARY_PATH`, `KIWI_MODEL_PATH`)
 - `Kiwi::from_config(...)` for explicit path control
+- `Kiwi::init_direct_with_dialects(...)` for direct model initialization with dialect flags
+- `KiwiLibrary::load_from_env_or_default()?.builder(...)` for dictionary/rule/typo customization
 
 Useful environment variables:
 - `KIWI_RS_VERSION` (bootstrap target version, default `latest`)
@@ -24,11 +30,12 @@ Useful environment variables:
 - `KIWI_MODEL_PATH` (model directory path)
 
 Main capabilities:
-- Analyze/tokenize/sentence split/join/space/glue
-- Builder customization (user words, regex rules, dictionaries)
-- Typo APIs (`KiwiTypo`)
+- Analyze/tokenize/sentence split/join/space (`space`, `space_via_native`)/glue (`glue`, `glue_via_native`, `glue_with_options_via_native`)
+- Builder customization (`add_user_word`, `add_user_word_with_def`, `add_alias_word_with_def`, `add_pre_analyzed_word`, `add_re_rule`, dictionaries)
+- Typo APIs (`KiwiTypo`, `PreparedTypo`, `KIWI_TYPO_DIALECT`, `analyze_with_typo`, `tokenize_with_typo`, `set_default_prepared_typo`)
 - Constrained analysis (`MorphemeSet`, `Pretokenized`)
 - Batch APIs (`analyze_many*`, `tokenize_many*`)
+- Global & OOV configuration (`GlobalConfig`, `oov_chr_bias`, `oov_global_weight`, `oov_local_weight`, `oov_global_min_freq`)
 - UTF-16 APIs (check support at runtime)
 - CoNg semantics and subword tokenizer (`SwTokenizer`)
 
@@ -44,20 +51,9 @@ Examples:
 - `examples/sw_tokenizer.rs`
 - `examples/morpheme_semantics.rs`
 
-Run examples:
-- `cargo run --example basic`
-- `cargo run --example analyze_options`
-- `cargo run --example builder_custom_words`
-- `cargo run --example typo_build`
-- `cargo run --example blocklist_and_pretokenized`
-- `cargo run --example split_sentences`
-- `cargo run --example utf16_api`
-- `cargo run --example native_batch`
-- `cargo run --example sw_tokenizer -- /path/to/tokenizer.json`
-- `cargo run --example morpheme_semantics`
-
 Notes for AI usage:
 - UTF-8 offsets are character indices, not byte offsets.
 - Check `supports_utf16_api()` before UTF-16 APIs.
 - Check `supports_analyze_mw()` before `analyze_many_utf16_via_native`.
+- Check `supports_builder_word_with_def()`, `supports_typo_prepare()`, and `supports_native_space_and_glue()` when targeting older `libkiwi` versions.
 - kiwipiepy parity is partial; some Python/C++-specific surfaces remain unavailable.

@@ -39,6 +39,8 @@ pub const KIWI_TYPO_BASIC_TYPO_SET_WITH_CONTINUAL: i32 = 3;
 pub const KIWI_TYPO_LENGTHENING_TYPO_SET: i32 = 4;
 /// Typo preset: basic + continual + lengthening typo sets.
 pub const KIWI_TYPO_BASIC_TYPO_SET_WITH_CONTINUAL_AND_LENGTHENING: i32 = 5;
+/// Typo preset: dialect typo set.
+pub const KIWI_TYPO_DIALECT: i32 = 6;
 
 /// Match option: URL detection.
 pub const KIWI_MATCH_URL: i32 = 1;

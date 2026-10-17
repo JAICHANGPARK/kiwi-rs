@@ -23,6 +23,8 @@ fn test_all_sequential() {
     run_global_config();
     run_config_shortcuts();
     run_typo_prepare();
+    run_builder_word_with_def();
+    run_native_space_and_glue();
 }
 
 fn run_global_config() {
@@ -68,26 +70,142 @@ fn run_config_shortcuts() {
         .expect("Failed to get typo_cost_weight");
     kiwi.set_typo_cost_weight(typo_weight)
         .expect("Failed to set typo_cost_weight");
+
+    let max_unk_j = kiwi
+        .max_unk_form_size_followed_by_j_class()
+        .expect("Failed to get max_unk_form_size_followed_by_j_class");
+    kiwi.set_max_unk_form_size_followed_by_j_class(max_unk_j)
+        .expect("Failed to set max_unk_form_size_followed_by_j_class");
+
+    let oov_rule_scale = kiwi.oov_rule_scale().expect("Failed to get oov_rule_scale");
+    kiwi.set_oov_rule_scale(oov_rule_scale)
+        .expect("Failed to set oov_rule_scale");
+
+    let oov_rule_bias = kiwi.oov_rule_bias().expect("Failed to get oov_rule_bias");
+    kiwi.set_oov_rule_bias(oov_rule_bias)
+        .expect("Failed to set oov_rule_bias");
+
+    let oov_chr_bias = kiwi.oov_chr_bias().expect("Failed to get oov_chr_bias");
+    kiwi.set_oov_chr_bias(oov_chr_bias)
+        .expect("Failed to set oov_chr_bias");
+
+    let oov_global_weight = kiwi
+        .oov_global_weight()
+        .expect("Failed to get oov_global_weight");
+    kiwi.set_oov_global_weight(oov_global_weight)
+        .expect("Failed to set oov_global_weight");
+
+    let oov_local_weight = kiwi
+        .oov_local_weight()
+        .expect("Failed to get oov_local_weight");
+    kiwi.set_oov_local_weight(oov_local_weight)
+        .expect("Failed to set oov_local_weight");
+
+    let oov_global_min_freq = kiwi
+        .oov_global_min_freq()
+        .expect("Failed to get oov_global_min_freq");
+    kiwi.set_oov_global_min_freq(oov_global_min_freq)
+        .expect("Failed to set oov_global_min_freq");
 }
 
 fn run_typo_prepare() {
     println!("Starting run_typo_prepare");
     let library = KiwiLibrary::load_from_env_or_default().expect("Failed to load Kiwi library");
     let typo = library.basic_typo().expect("Failed to create typo set");
-    let prepared = typo.prepare();
-    match prepared {
-        Ok(_prepared_typo) => {
-            println!("PreparedTypo successfully compiled and dropped.");
-        }
-        Err(KiwiError::SymbolLoad(_)) => {
-            println!(
-                "Kiwi library does not export kiwi_typo_prepare (pre-0.23), skipped gracefully."
-            );
-        }
-        Err(err) => {
-            panic!("Unexpected error from typo.prepare(): {err}");
-        }
+    if !library.supports_typo_prepare() {
+        println!("Kiwi library does not export kiwi_typo_prepare (pre-0.23), skipped gracefully.");
+        return;
     }
+
+    let prepared = typo.prepare().expect("Failed to prepare typo");
+    let mut kiwi = get_kiwi();
+    let options = AnalyzeOptions::default().with_typo_threshold(2.5);
+    let candidates = kiwi
+        .analyze_with_typo("외않되", options, Some(&prepared))
+        .expect("Failed to analyze_with_typo");
+    assert!(!candidates.is_empty());
+
+    let tokens = kiwi
+        .tokenize_with_typo("외않되", options, Some(&prepared))
+        .expect("Failed to tokenize_with_typo");
+    assert!(!tokens.is_empty());
+
+    assert!(kiwi.default_prepared_typo().is_none());
+    kiwi.set_default_prepared_typo(Some(prepared))
+        .expect("Failed to set_default_prepared_typo");
+    assert!(kiwi.default_prepared_typo().is_some());
+    let tokens_default = kiwi
+        .tokenize("외않되")
+        .expect("Failed to tokenize with default typo");
+    assert!(!tokens_default.is_empty());
+    kiwi.set_default_prepared_typo(None)
+        .expect("Failed to clear default_prepared_typo");
+    assert!(kiwi.default_prepared_typo().is_none());
+}
+
+fn run_builder_word_with_def() {
+    println!("Starting run_builder_word_with_def");
+    let library = KiwiLibrary::load_from_env_or_default().expect("Failed to load Kiwi library");
+    if !library.supports_builder_word_with_def() {
+        println!(
+            "Kiwi library does not export kiwi_builder_add_word_with_def (pre-0.24), skipped gracefully."
+        );
+        return;
+    }
+
+    let mut builder = library
+        .builder(BuilderConfig::default())
+        .expect("Failed to create builder");
+    builder
+        .add_user_word_with_def(
+            "러스트바인딩테스트단어",
+            "NNP",
+            1,
+            KIWI_DIALECT_STANDARD,
+            5.0,
+        )
+        .expect("Failed to add_user_word_with_def");
+    builder
+        .add_alias_word_with_def(
+            "러바테단",
+            "NNP",
+            1,
+            KIWI_DIALECT_STANDARD,
+            4.0,
+            "러스트바인딩테스트단어",
+        )
+        .expect("Failed to add_alias_word_with_def");
+    let kiwi = builder.build().expect("Failed to build Kiwi");
+    let tokens = kiwi
+        .tokenize("러스트바인딩테스트단어에 대해 알아보자.")
+        .expect("Failed to tokenize");
+    assert!(tokens
+        .iter()
+        .any(|t| t.form == "러스트바인딩테스트단어" && t.tag == "NNP"));
+}
+
+fn run_native_space_and_glue() {
+    println!("Starting run_native_space_and_glue");
+    let kiwi = get_kiwi();
+    if !kiwi.supports_native_space_and_glue() {
+        println!(
+            "Kiwi library does not export kiwi_space / kiwi_glue (pre-0.24), skipped gracefully."
+        );
+        return;
+    }
+
+    let spaced = kiwi
+        .space_via_native("띄어쓰기가없는문장입니다", true)
+        .expect("Failed to space_via_native");
+    assert!(spaced.contains("띄어쓰기"));
+    assert!(spaced.contains(' '));
+
+    let chunks = ["안녕하세요", "반갑습니다"];
+    let (glued, insertions) = kiwi
+        .glue_with_options_via_native(&chunks, None, true)
+        .expect("Failed to glue_with_options_via_native");
+    assert!(!glued.is_empty());
+    assert_eq!(insertions.as_ref().map(Vec::len), Some(1));
 }
 
 // ... (existing functions)

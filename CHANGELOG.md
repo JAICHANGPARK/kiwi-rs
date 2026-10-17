@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2026.10.17] - 2026-10-17
+
+### Added
+- Full Kiwi `v0.24.0` and upstream `HEAD` (`capi.h` `106/106` symbols) C API alignment and dynamic symbol loading:
+  - `kiwi_builder_add_word_with_def` and `kiwi_builder_add_alias_word_with_def` (`KiwiBuilder::add_user_word_with_def`, `KiwiBuilder::add_alias_word_with_def`, `KiwiLibrary::supports_builder_word_with_def`, `Kiwi::supports_builder_word_with_def`).
+  - `kiwi_space`, `kiwi_glue`, and `kiwi_free_string` (`Kiwi::space_via_native`, `Kiwi::glue_via_native`, `Kiwi::glue_with_options_via_native`, `KiwiLibrary::supports_native_space_and_glue`, `Kiwi::supports_native_space_and_glue`).
+  - `KIWI_TYPO_DIALECT` (`6`) constant for dialect-aware typo preset sets.
+  - `Kiwi::init_direct_with_dialects` supporting the 4-argument `kiwi_init(model_path, num_threads, options, enabled_dialects)` C signature.
+- Runtime typo transformer (`PreparedTypo`) integration during analysis and tokenization:
+  - Added `AnalyzeOptions::typo_threshold` (default `2.5`) and `.with_typo_threshold()` / `.with_typo_cost_threshold()` builder methods.
+  - Added `Kiwi::default_prepared_typo` and `Kiwi::set_default_prepared_typo`, plus automatic `PreparedTypo` initialization in `KiwiBuilder::build_with_typo_and_default_options`.
+  - Added `Kiwi::analyze_with_typo`, `Kiwi::analyze_with_blocklist_and_pretokenized_and_typo`, `Kiwi::tokenize_with_typo`, `Kiwi::tokenize_with_blocklist_and_pretokenized_and_typo`, and UTF-16 counterparts (`analyze_utf16_with_typo`, `analyze_utf16_with_blocklist_and_pretokenized_and_typo`, `tokenize_utf16_with_typo`, `tokenize_utf16_with_blocklist_and_pretokenized_and_typo`).
+- Added `GlobalConfig` shortcut getters and setters on `Kiwi` for Kiwi 0.23+ OOV and unknown form parameters (`max_unk_form_size_followed_by_j_class`, `unk_form_score_scale` / `oov_rule_scale`, `unk_form_score_bias` / `oov_rule_bias`, `oov_chr_bias`, `oov_global_weight`, `oov_local_weight`, `oov_global_min_freq`).
+- Added and expanded AI agent skills (`skills/kiwi-rs-assistant`, `skills/kiwi-rs-migration`) and workspace skill discovery manifest (`.agents/skills.json`).
+
+### Changed
+- Updated `FnKiwiInit` FFI signature to pass `enabled_dialects` (`KIWI_DIALECT_STANDARD` by default in `Kiwi::init_direct`) to match upstream `kiwi_init` in Kiwi `v0.24.0`.
+- Updated Rust spacing heuristics (`should_insert_space_between` and `should_strip_gap`) to include `"하지"` in auxiliary verb (`VX`) spacing rules, matching upstream `src/Spacing.cpp`.
+- Implemented `Send` and `Sync` for immutable `PreparedTypo` handle wrapper.
+
 ## [2026.8.26] - 2026-08-25
 
 ### Fixed

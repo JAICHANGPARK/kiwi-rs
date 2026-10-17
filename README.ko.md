@@ -47,18 +47,19 @@ AI에게 반드시 지키게 할 정확성 체크:
 - `analyze_many_utf16_via_native` 사용 전 `supports_analyze_mw()` 확인.
 - `kiwipiepy` 완전 호환으로 단정하지 않기 (`docs/kiwipiepy_parity.ko.md` 참고).
 
-### Skill 기반 사용 (`skills/`)
+### Skill 기반 사용 (`skills/` 및 `.agents/skills.json`)
 
-이 저장소에는 `kiwi-rs` 전용 로컬 AI 스킬이 포함되어 있습니다.
+이 저장소에는 `kiwi-rs` 전용 로컬 AI 스킬 세트가 포함되어 있으며 `.agents/skills.json`을 통해 자동 탐색됩니다.
 
-- 스킬 본문: `skills/kiwi-rs-assistant/SKILL.md`
-- 참조 문서: `skills/kiwi-rs-assistant/references/`
-- 에이전트 메타데이터: `skills/kiwi-rs-assistant/agents/openai.yaml`
+- **`kiwi-rs-assistant`** (`skills/kiwi-rs-assistant/SKILL.md`): 한국어 형태소 분석/토크나이즈/사전 커스터마이징/오타 교정 코드 생성, 실전 레시피(`references/recipes.md`), 작업별 API 매핑(`references/task-to-api.md`), 트러블슈팅(`references/troubleshooting.md`).
+- **`kiwi-rs-migration`** (`skills/kiwi-rs-migration/SKILL.md`): Python `kiwipiepy` 코드를 Rust `kiwi-rs`로 1:1 변환하는 마이그레이션 가이드(`references/kiwipiepy-mapping.md`).
+- 에이전트 메타데이터: `skills/*/agents/openai.yaml`
 
 스킬 호출이 가능한 AI라면 아래처럼 명시적으로 호출하세요.
 
 ```text
 $kiwi-rs-assistant를 사용해서 다음 작업을 구현해줘: <원하는 작업>
+$kiwi-rs-migration을 사용해서 아래 Python kiwipiepy 코드를 Rust로 변환해줘: <코드>
 ```
 
 ### `llms.txt` 사용
@@ -74,10 +75,10 @@ AI에 프롬프트를 보낼 때 `llms.txt`를 첫 컨텍스트 파일로 같이
 
 ## 현재 지원 수준
 
-2026-02-16 기준:
+2026-10 기준 (Kiwi `v0.24.0` / upstream `HEAD`):
 
-- C API 심볼 로딩: 완료 (`capi.h` 기준 `101/101`)
-- 핵심 고수준 사용 흐름: 구현 완료 (`init/new/from_config`, `analyze/tokenize/split/join`, `MorphemeSet`, `Pretokenized`, 오타 API, `SwTokenizer`, CoNg API)
+- C API 심볼 로딩: 완료 (`capi.h` 기준 `106/106`)
+- 핵심 고수준 사용 흐름: 구현 완료 (`init/new/from_config`, `analyze/tokenize/split/join`, `space/glue` 네이티브 및 Rust 경로, `MorphemeSet`, `Pretokenized`, 오타 및 `PreparedTypo` API, `SwTokenizer`, CoNg API)
 - `kiwipiepy` 표면 완전 호환: 부분 지원 (Python/C++ 전용 계층 일부 미구현)
 
 ## 설치
@@ -165,16 +166,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### 핵심 API
 
-- 초기화: `Kiwi::init`, `Kiwi::new`, `Kiwi::from_config`, `Kiwi::init_direct`
+- 초기화: `Kiwi::init`, `Kiwi::new`, `Kiwi::from_config`, `Kiwi::init_direct`, `Kiwi::init_direct_with_dialects`
 - 분석/토크나이즈: `analyze*`, `tokenize*`, `analyze_many*`, `tokenize_many*`
 - 문장 분리: `split_into_sents*`, `split_into_sents_with_options*`
-- 결합/띄어쓰기: `join*`, `space*`, `glue*`
+- 결합/띄어쓰기: `join*`, `space*`, `space_via_native`, `glue*`, `glue_via_native`, `glue_with_options_via_native`
 
 ### 고급 API
 
-- Builder: 사용자 단어/별칭 단어/기분석 단어/사용자 사전/정규식 규칙/단어 추출
+- Builder: 사용자 단어(`add_user_word`, `add_user_word_with_def`)/별칭 단어(`add_alias_word`, `add_alias_word_with_def`)/기분석 단어/사용자 사전/정규식 규칙/단어 추출
 - 제약 객체: `MorphemeSet`, `Pretokenized`
-- 오타: `KiwiTypo`, 기본 오타셋, 비용 조정
+- 오타: `KiwiTypo`, `PreparedTypo`, 기본 오타셋(`KIWI_TYPO_DIALECT` 등), 런타임 오타 분석(`analyze_with_typo`, `tokenize_with_typo`, `set_default_prepared_typo`), 비용 조정
 - 서브워드: `SwTokenizer`
 - CoNg: 유사도/문맥/예측/context-id 변환
 
@@ -183,6 +184,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 - `Kiwi::supports_utf16_api`
 - `Kiwi::supports_analyze_mw`
 - `KiwiLibrary::supports_builder_init_stream`
+- `Kiwi::supports_builder_word_with_def` / `KiwiLibrary::supports_builder_word_with_def`
+- `Kiwi::supports_typo_prepare` / `KiwiLibrary::supports_typo_prepare`
+- `Kiwi::supports_native_space_and_glue` / `KiwiLibrary::supports_native_space_and_glue`
 
 ## 예제 실행
 
